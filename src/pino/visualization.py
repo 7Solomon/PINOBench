@@ -40,8 +40,9 @@ plt.rcParams.update(
 
 
 def run_title(problem: Problem, mode: str, rel_l2: float) -> str:
-    """Title format ``Benchmark · Modus · rel. L2``."""
-    return f"{problem.name} · {mode} · rel. L2 = {100 * rel_l2:.2f} %"
+    """Title format ``Benchmark · Modus · rel. L2``. Multi-output problems name the main variable."""
+    variable = f" ({problem.main_variable})" if len(problem.variable_names["solution"]) > 1 else ""
+    return f"{problem.name} · {mode} · rel. L2{variable} = {100 * rel_l2:.2f} %"
 
 
 def _save(fig, path: Path) -> None:
@@ -134,7 +135,7 @@ def plot_solution_1d_t(problem: Problem, result: EvaluationResult, title: str, p
     x = problem.to_physical(x_name, result.dataset.grid[0, :, 0].numpy())
     t = problem.to_physical(t_name, result.dataset.grid[1, 0, :].numpy())
     extent = (x[0], x[-1], t[0], t[-1])
-    errors = result.errors.numpy()
+    errors = result.main_errors.numpy()
 
     fig, axes = plt.subplots(
         3, 4, figsize=(14, 8.4), constrained_layout=True, gridspec_kw={"width_ratios": [1, 1, 1, 1.15]}
@@ -174,8 +175,49 @@ def plot_solution_1d_t(problem: Problem, result: EvaluationResult, title: str, p
     _save(fig, path)
 
 
-#: Solution plot for each ``Problem.plot_type``. Add ``"1d"``, ``"2d"`` and ``"2d_t"`` here.
+def plot_solution_1d(problem: Problem, result: EvaluationResult, title: str, path: Path) -> None:
+    """Profiles of every output variable for the best, median and worst example.
+
+    Each example gets two rows: analytical (solid) against FNO (dashed), and below it the
+    absolute error. Output variables sit side by side.
+    """
+    x_name = problem.variable_names["coordinates"][0]
+    names = problem.variable_names["solution"]
+    x = problem.to_physical(x_name, result.dataset.grid[0].numpy())
+    main_errors = result.main_errors.numpy()
+
+    fig, axes = plt.subplots(
+        6,
+        len(names),
+        figsize=(4.6 * len(names), 10.5),
+        constrained_layout=True,
+        squeeze=False,
+        sharex=True,
+        gridspec_kw={"height_ratios": [2, 1] * 3},
+    )
+    for block, (label, index) in enumerate(_representative_examples(main_errors)):
+        for channel, name in enumerate(names):
+            solution_axis, error_axis = axes[2 * block, channel], axes[2 * block + 1, channel]
+            exact = problem.to_physical(name, result.dataset.targets[index, channel].numpy())
+            predicted = problem.to_physical(name, result.predictions[index, channel].numpy())
+            error = 100 * result.errors[index, channel].item()
+
+            solution_axis.plot(x, exact, color=SERIES_COLORS[0], label="Analytisch")
+            solution_axis.plot(x, predicted, color=SERIES_COLORS[1], linestyle="--", label="FNO")
+            solution_axis.set(ylabel=problem.label(name), title=f"{label} · {name} · rel. L2 = {error:.2f} %")
+            error_axis.plot(x, np.abs(exact - predicted), color=REFERENCE_COLOR, linewidth=1.2)
+            error_axis.set(ylabel=f"|Fehler| [{problem.units[name]}]")
+            if block == 0 and channel == 0:
+                solution_axis.legend()
+    for axis in axes[-1]:
+        axis.set_xlabel(problem.label(x_name))
+    fig.suptitle(title)
+    _save(fig, path)
+
+
+#: Solution plot for each ``Problem.plot_type``. Add ``"2d"`` and ``"2d_t"`` here.
 SOLUTION_PLOTTERS: dict[str, Callable[[Problem, EvaluationResult, str, Path], None]] = {
+    "1d": plot_solution_1d,
     "1d_t": plot_solution_1d_t,
 }
 
@@ -190,12 +232,12 @@ def plot_solution(problem: Problem, result: EvaluationResult, title: str, path: 
 def plot_run(problem: Problem, result: EvaluationResult, history: dict, mode: str, train_resolution: int, run_dir) -> None:
     """Write all four plots of a run to ``run_dir``."""
     run_dir = Path(run_dir)
-    errors = result.errors.numpy()
+    errors = result.main_errors.numpy()
     title = run_title(problem, mode, float(errors.mean()))
     plot_training(history, title, run_dir / "training.png")
     plot_solution(problem, result, title, run_dir / "solution.png")
     plot_error_histogram(errors, title, run_dir / "error_hist.png")
-    plot_resolution(result.resolution_errors, train_resolution, title, run_dir / "resolution.png")
+    plot_resolution(result.main_resolution_errors(), train_resolution, title, run_dir / "resolution.png")
 
 
 def plot_summary(rows: list[dict], path: Path) -> None:

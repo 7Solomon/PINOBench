@@ -38,7 +38,9 @@ def compute_loss(
         total = total + float(weights.physics) * physics
         components["physics"] = physics.item()
     if uses_data(mode):
-        data = (prediction - target).pow(2).mean()
+        scale = problem.data_scale(inputs, grid)
+        difference = prediction - target if scale is None else (prediction - target) / scale
+        data = difference.pow(2).mean()
         total = total + float(weights.data) * data
         components["data"] = data.item()
     components["total"] = total.item()

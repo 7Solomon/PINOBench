@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import copy
+import json
 import logging
+import os
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -19,6 +23,9 @@ from pino.losses import compute_loss, uses_data
 from pino.problems.base import Problem
 
 log = logging.getLogger(__name__)
+
+CHECKPOINT = "best_model.pt"
+HISTORY = "history.json"
 
 
 def set_seed(seed: int) -> None:
@@ -81,8 +88,28 @@ def train_step(
     return components
 
 
-def train(model: nn.Module, problem: Problem, cfg, device: torch.device) -> TrainingResult:
-    """Train ``model`` according to ``cfg`` and return its history and best weights."""
+def save_atomic(path: Path, write: Callable[[Path], None]) -> None:
+    """Write a file through a temporary sibling, so a failed write keeps the old file intact."""
+    temporary = path.with_name(path.name + ".tmp")
+    write(temporary)
+    os.replace(temporary, path)
+
+
+def save_progress(run_dir: Path, result: TrainingResult, write_model: bool) -> None:
+    """Write ``history.json`` and, after an improvement, ``best_model.pt``."""
+    if write_model:
+        save_atomic(run_dir / CHECKPOINT, lambda path: torch.save(result.best_state, path))
+    save_atomic(run_dir / HISTORY, lambda path: path.write_text(json.dumps(result.history())))
+
+
+def train(
+    model: nn.Module, problem: Problem, cfg, device: torch.device, run_dir: Path | None = None
+) -> TrainingResult:
+    """Train ``model`` according to ``cfg`` and return its history and best weights.
+
+    With ``run_dir``, the best weights and the history are written whenever the test error
+    improves and once more at the end, so an interrupted run keeps its best model.
+    """
     training = cfg.training
     seed = int(cfg.seed)
     train_set = build_dataset(
@@ -124,13 +151,17 @@ def train(model: nn.Module, problem: Problem, cfg, device: torch.device) -> Trai
 
         if epoch % int(training.eval_every) == 0 or epoch == epochs:
             _, errors = predict_dataset(model, problem, test_set, device, int(training.batch_size))
-            error = errors.mean().item()
+            error = errors[:, problem.main_channel].mean().item()
             result.eval_epochs.append(epoch)
             result.test_rel_l2.append(error)
-            if error < result.best_rel_l2:
+            improved = error < result.best_rel_l2
+            if improved:
                 result.best_rel_l2 = error
                 result.best_epoch = epoch
                 result.best_state = copy.deepcopy(model.state_dict())
+            result.training_time_s = time.perf_counter() - start
+            if run_dir is not None:
+                save_progress(run_dir, result, write_model=improved)
             log.info(
                 "epoch %4d/%d  loss %.3e  test rel. L2 %.3f %%  best %.3f %%  %.0f s",
                 epoch,
@@ -141,4 +172,6 @@ def train(model: nn.Module, problem: Problem, cfg, device: torch.device) -> Trai
                 time.perf_counter() - start,
             )
     result.training_time_s = time.perf_counter() - start
+    if run_dir is not None:
+        save_progress(run_dir, result, write_model=False)
     return result

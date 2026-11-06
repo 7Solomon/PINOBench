@@ -21,10 +21,10 @@ def predict(model: nn.Module, problem: Problem, inputs: Tensor, grid: Tensor) ->
 
 
 def relative_l2(prediction: Tensor, target: Tensor) -> Tensor:
-    """Return ``||u - u_hat|| / ||u||`` per example, shape ``(B,)``."""
-    batch = target.shape[0]
-    difference = (prediction - target).reshape(batch, -1).norm(dim=1)
-    return difference / target.reshape(batch, -1).norm(dim=1)
+    """Return ``||u - u_hat|| / ||u||`` per example and channel, shape ``(B, C)``."""
+    batch, channels = target.shape[:2]
+    difference = (prediction - target).reshape(batch, channels, -1).norm(dim=-1)
+    return difference / target.reshape(batch, channels, -1).norm(dim=-1)
 
 
 def summarize_errors(errors: Tensor) -> dict[str, float]:
@@ -35,11 +35,16 @@ def summarize_errors(errors: Tensor) -> dict[str, float]:
     }
 
 
+def summarize_per_variable(problem: Problem, errors: Tensor) -> dict[str, dict[str, float]]:
+    """Summaries keyed by solution variable, for errors of shape ``(B, C)``."""
+    return {name: summarize_errors(errors[:, c]) for c, name in enumerate(problem.variable_names["solution"])}
+
+
 @torch.no_grad()
 def predict_dataset(
     model: nn.Module, problem: Problem, dataset: OperatorDataset, device: torch.device, batch_size: int = 32
 ) -> tuple[Tensor, Tensor]:
-    """Return all predictions and per-example errors, both on the CPU."""
+    """Return all predictions and the errors ``(B, C)``, both on the CPU."""
     was_training = model.training
     model.eval()
     grid = dataset.grid.to(device)
@@ -60,8 +65,19 @@ class EvaluationResult:
 
     dataset: OperatorDataset
     predictions: Tensor
+    #: Relative L2 per example and output channel, ``(B, C)``.
     errors: Tensor
-    resolution_errors: dict[int, dict[str, float]]
+    main_channel: int
+    #: Resolution -> variable -> summary.
+    resolution_errors: dict[int, dict[str, dict[str, float]]]
+    main_variable: str
+
+    @property
+    def main_errors(self) -> Tensor:
+        return self.errors[:, self.main_channel]
+
+    def main_resolution_errors(self) -> dict[int, dict[str, float]]:
+        return {resolution: errors[self.main_variable] for resolution, errors in self.resolution_errors.items()}
 
 
 def test_seed(seed: int) -> int:
@@ -81,8 +97,10 @@ def evaluate_model(model: nn.Module, problem: Problem, cfg, device: torch.device
     for resolution in cfg.problem.resolution_study:
         study = build_dataset(problem, n_test, resolution, seed)
         _, study_errors = predict_dataset(model, problem, study, device, batch_size)
-        resolution_errors[int(resolution)] = summarize_errors(study_errors)
-    return EvaluationResult(dataset, predictions, errors, resolution_errors)
+        resolution_errors[int(resolution)] = summarize_per_variable(problem, study_errors)
+    return EvaluationResult(
+        dataset, predictions, errors, problem.main_channel, resolution_errors, problem.main_variable
+    )
 
 
 def write_metrics(
@@ -95,15 +113,22 @@ def write_metrics(
     n_parameters: int,
     timestamp: str,
 ) -> dict:
-    """Write ``metrics.json`` and return its content."""
+    """Write ``metrics.json`` and return its content.
+
+    ``rel_l2`` and ``resolution_study`` refer to the main variable, the ``*_per_variable``
+    entries hold every output channel.
+    """
     metrics = {
         "benchmark": problem.name,
         "mode": cfg.training.mode,
         "model": cfg.model.name,
         "seed": int(cfg.seed),
         "timestamp": timestamp,
-        "rel_l2": summarize_errors(result.errors),
-        "resolution_study": {str(k): v for k, v in result.resolution_errors.items()},
+        "main_variable": problem.main_variable,
+        "rel_l2": summarize_errors(result.main_errors),
+        "rel_l2_per_variable": summarize_per_variable(problem, result.errors),
+        "resolution_study": {str(k): v for k, v in result.main_resolution_errors().items()},
+        "resolution_study_per_variable": {str(k): v for k, v in result.resolution_errors.items()},
         "train_resolution": int(cfg.problem.train_resolution),
         "test_resolution": int(cfg.problem.test_resolution),
         "training_time_s": training_time_s,

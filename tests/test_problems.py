@@ -7,6 +7,7 @@ import torch
 from omegaconf import OmegaConf
 
 from pino.evaluation import predict, relative_l2
+from pino.numerics.constraints import apply_hard_constraint, dirichlet_1d
 from pino.models.factory import build_model
 from pino.problems import available_problems, build_problem
 from pino.problems.thermal import Heat1D
@@ -47,7 +48,7 @@ def test_shapes(problem, inputs):
 
 
 def test_coordinates_reach_the_model_exactly_once(problem, inputs):
-    model = build_model(MODEL_CFG, problem)
+    model = build_model(MODEL_CFG, problem, 16)
     assert model.positional_embedding is None
     assert model.lifting.fcs[0].in_channels == problem.in_channels
     grid = problem.grid(16)
@@ -59,7 +60,7 @@ def test_coordinates_reach_the_model_exactly_once(problem, inputs):
 
 def test_hard_constraint_is_exact_for_any_network_output(problem, inputs):
     grid = problem.grid(16)
-    model = build_model(MODEL_CFG, problem)
+    model = build_model(MODEL_CFG, problem, 16)
     u = predict(model, problem, inputs, grid)
     exact = problem.analytical(inputs, grid)
 
@@ -94,7 +95,7 @@ def test_fd_residual_of_analytical_solution_is_small_and_converges(problem, inpu
 def test_training_step_runs_on_cpu(problem, inputs, mode):
     torch.manual_seed(0)
     grid = problem.grid(16)
-    model = build_model(MODEL_CFG, problem)
+    model = build_model(MODEL_CFG, problem, 16)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     weights = OmegaConf.create({"physics": 1.0, "data": 1.0})
     target = problem.analytical(inputs, grid) if mode != "physics" else None
@@ -107,5 +108,17 @@ def test_training_step_runs_on_cpu(problem, inputs, mode):
 
 
 def test_relative_l2_scale():
-    target = torch.ones(2, 1, 4, 4)
-    assert torch.allclose(relative_l2(1.1 * target, target), torch.tensor([0.1, 0.1]))
+    target = torch.ones(2, 2, 4, 4)
+    prediction = target.clone()
+    prediction[:, 0] *= 1.1
+    assert torch.allclose(relative_l2(prediction, target), torch.tensor([[0.1, 0.0], [0.1, 0.0]]))
+
+
+def test_dirichlet_1d_constraint_reproduces_boundary_values_exactly():
+    x = torch.linspace(0, 1, 17)
+    left = torch.tensor([[1.0, -2.0], [0.5, 0.0]])
+    right = torch.tensor([[0.0, 3.0], [-0.25, 7.0]])
+    g, phi = dirichlet_1d(x, left, right)
+    u = apply_hard_constraint(torch.randn(2, 2, 17), g, phi)
+    assert g.shape == (2, 2, 17) and phi.shape == (1, 1, 17)
+    assert torch.equal(u[..., 0], left) and torch.equal(u[..., -1], right)

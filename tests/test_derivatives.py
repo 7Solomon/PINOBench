@@ -5,7 +5,7 @@ import math
 import pytest
 import torch
 
-from pino.numerics.derivatives import central_d1, central_d2, interior
+from pino.numerics.derivatives import central_d1, central_d2, conservative_divergence, interior
 from pino.numerics.grids import as_resolution, grid_spacing, uniform_grid
 
 
@@ -75,3 +75,32 @@ def test_as_resolution():
     assert as_resolution([8, 16], 2) == (8, 16)
     with pytest.raises(ValueError):
         as_resolution([8, 16, 32], 2)
+
+
+def test_conservative_divergence_reduces_to_second_derivative_for_constant_k():
+    x, h = _grid(41)
+    u = torch.sin(2 * math.pi * x)
+    k_faces = torch.full((40,), 3.0, dtype=torch.float64)
+    assert torch.allclose(conservative_divergence(u, k_faces, h), 3.0 * central_d2(u, h, 0))
+
+
+def test_conservative_divergence_converges_with_order_two():
+    def error(n: int) -> float:
+        x, h = _grid(n)
+        faces = 0.5 * (x[1:] + x[:-1])
+        k = lambda s: 1.0 + 0.5 * s  # noqa: E731
+        u = torch.sin(2 * math.pi * x)
+        exact = 0.5 * 2 * math.pi * torch.cos(2 * math.pi * x) - k(x) * (2 * math.pi) ** 2 * torch.sin(2 * math.pi * x)
+        return (conservative_divergence(u, k(faces), h) - exact[1:-1]).abs().max().item()
+
+    errors = [error(n) for n in (21, 41, 81, 161)]
+    orders = [math.log2(coarse / fine) for coarse, fine in zip(errors, errors[1:])]
+    assert all(order == pytest.approx(2.0, abs=0.1) for order in orders)
+
+
+def test_conservative_divergence_gravity_term():
+    """u = -z has zero flux k (u' + 1) for any k, so the operator vanishes."""
+    z, h = _grid(33)
+    k_faces = torch.rand(32, dtype=torch.float64) + 0.5
+    assert conservative_divergence(-z, k_faces, h, gravity=1.0).abs().max() < 1e-12
+    assert conservative_divergence(-z, k_faces, h).abs().max() > 0.1

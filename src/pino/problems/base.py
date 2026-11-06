@@ -35,6 +35,15 @@ class Problem(ABC):
     #: Factor that converts each variable from model units to physical units.
     scales: dict[str, float]
 
+    @property
+    def main_variable(self) -> str:
+        """Solution variable used for model selection, acceptance and the summary."""
+        return self.variable_names["solution"][0]
+
+    @property
+    def main_channel(self) -> int:
+        return self.variable_names["solution"].index(self.main_variable)
+
     @abstractmethod
     def grid(self, resolution: int | Sequence[int]) -> Tensor:
         """Return the coordinates of the given resolution, including the boundaries."""
@@ -58,6 +67,14 @@ class Problem(ABC):
     @abstractmethod
     def to_fno_input(self, inputs: Tensor, grid: Tensor) -> Tensor:
         """Return the network input ``(B, in_channels, *resolution)``, including coordinates."""
+
+    def data_scale(self, inputs: Tensor, grid: Tensor) -> Tensor | None:
+        """Typical magnitude of each output channel, ``(B, C, 1, ...)``, for the data loss.
+
+        ``None`` (the default) uses the plain MSE. Problems whose outputs differ in size by
+        orders of magnitude return a scale so that all channels count alike.
+        """
+        return None
 
     def to_physical(self, variable: str, values):
         """Convert a variable from model units to physical units."""

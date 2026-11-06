@@ -1,6 +1,7 @@
 """Collect ``metrics.json`` files into ``summary.csv``, ``summary.md`` and ``summary.png``.
 
-If a benchmark and mode were run several times, the most recent run is used.
+If a benchmark and mode were run several times, the most recent run is used. All error
+columns refer to the main variable of each benchmark.
 
 Usage: ``python scripts/summarize.py [--outputs outputs]``
 """
@@ -17,6 +18,7 @@ from pino.visualization import plot_summary
 COLUMNS = {
     "benchmark": "Benchmark",
     "mode": "Modus",
+    "variable": "Variable",
     "rel_l2_mean": "rel. L2 Mittel",
     "rel_l2_median": "rel. L2 Median",
     "rel_l2_max": "rel. L2 Max",
@@ -38,6 +40,7 @@ def collect(outputs: Path) -> list[dict]:
         {
             "benchmark": m["benchmark"],
             "mode": m["mode"],
+            "variable": m.get("main_variable", "-"),
             "rel_l2_mean": m["rel_l2"]["mean"],
             "rel_l2_median": m["rel_l2"]["median"],
             "rel_l2_max": m["rel_l2"]["max"],
@@ -53,6 +56,7 @@ def format_row(row: dict) -> list[str]:
     return [
         row["benchmark"],
         row["mode"],
+        row["variable"],
         f"{100 * row['rel_l2_mean']:.2f} %",
         f"{100 * row['rel_l2_median']:.2f} %",
         f"{100 * row['rel_l2_max']:.2f} %",

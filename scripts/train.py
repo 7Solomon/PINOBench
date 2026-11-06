@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime
 from pathlib import Path
 
 import hydra
-import torch
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig
 
@@ -28,14 +26,12 @@ def main(cfg: DictConfig) -> None:
     device = select_device(cfg.device)
 
     problem = build_problem(cfg.problem)
-    model = build_model(cfg.model, problem).to(device)
+    model = build_model(cfg.model, problem, cfg.problem.train_resolution).to(device)
     n_parameters = count_parameters(model)
     log.info("%s, mode %s, %d parameters on %s", problem.name, cfg.training.mode, n_parameters, device)
 
-    outcome = train(model, problem, cfg, device)
-    torch.save(outcome.best_state, run_dir / "best_model.pt")
+    outcome = train(model, problem, cfg, device, run_dir)
     history = outcome.history()
-    (run_dir / "history.json").write_text(json.dumps(history))
 
     model.load_state_dict(outcome.best_state)
     result = evaluate_model(model, problem, cfg, device)

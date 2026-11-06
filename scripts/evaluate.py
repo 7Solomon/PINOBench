@@ -32,7 +32,7 @@ def main() -> None:
     device = select_device(args.device)
 
     problem = build_problem(cfg.problem)
-    model = build_model(cfg.model, problem).to(device)
+    model = build_model(cfg.model, problem, cfg.problem.train_resolution).to(device)
     state = torch.load(args.run_dir / "best_model.pt", map_location=device, weights_only=False)
     model.load_state_dict(state)
 
