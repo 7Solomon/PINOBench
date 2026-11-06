@@ -1,0 +1,19 @@
+# Simply supported Euler-Bernoulli beam, mixed form: M'' = -q, w'' = -M / EI on x in [0, 1]
+# w = M = 0 at both supports. Load q(x) = q0 + q1 x.
+name: beam_1d
+q0_low: 0.0
+q0_high: 1.0
+q1_low: 0.0
+q1_high: 1.0
+stiffness_low: 0.5   # EI / EI_ref
+stiffness_high: 2.0
+
+# Reference values: x = x_hat L, q = q_hat q_ref, EI = EI_hat EI_ref,
+# w = w_hat q_ref L^4 / EI_ref, M = M_hat q_ref L^2. Gives deflections of about 1-25 mm.
+length: 5.0          # m
+load_ref: 10.0       # kN/m
+stiffness_ref: 1.0e4 # kNm^2
+
+train_resolution: 64
+test_resolution: 64
+resolution_study: [32, 64, 128, 256]
