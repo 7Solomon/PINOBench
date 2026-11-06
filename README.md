@@ -27,14 +27,18 @@ python scripts/train.py problem=darcy_layered_1d training=hybrid   # uses loss_w
 # override single values
 python scripts/train.py problem=richards_steady_1d training=physics training.epochs=1000 seed=1
 
-# re-evaluate and re-plot a finished run
+# variants (defaults: inputs simple, output_param constrained)
+python scripts/train.py problem=beam_1d training=data problem.output_param=direct seed=1
+
+# re-evaluate and re-plot a finished run (refuses runs with a different wrapper)
 python scripts/evaluate.py outputs/heat_1d/physics/<timestamp>
+python scripts/evaluate.py outputs/heat_1d/physics/<timestamp> --allow-legacy  # runs without wrapper_version
 
 # collect all runs under outputs/
 python scripts/summarize.py
 ```
 
-Each run writes to `outputs/<benchmark>/<mode>/<timestamp>/`:
+Each run writes to `outputs/<benchmark>/<inputs>-<output_param>/<mode>/<timestamp>/`:
 
 | File | Content |
 |---|---|
@@ -47,8 +51,10 @@ Each run writes to `outputs/<benchmark>/<mode>/<timestamp>/`:
 | `resolution.png` | rel. L2 against the test resolution |
 | `.hydra/config.yaml` | full configuration of the run |
 
-`summarize.py` writes `outputs/summary.csv`, `outputs/summary.md` and `outputs/summary.png`,
-using the most recent run per benchmark and mode.
+`summarize.py` writes `outputs/summary.csv`, `outputs/summary.md` and `outputs/summary.png`.
+It groups by benchmark × `inputs` × `output_param` × mode, takes the most recent run per seed
+and reports the mean, minimum and maximum over the seeds. Runs under `outputs/_superseded/`
+are ignored.
 
 ### Training modes
 
@@ -85,6 +91,46 @@ loss_weights: {physics: 1.0, data: 300.0}
 which replaces `training.weights` in `hybrid` mode; `physics` and `data` keep their single
 fixed term. Only `darcy_layered_1d` sets it, because its hybrid run did not reach the data
 mode's accuracy at 1:1. A command-line override such as `training.weights.data=50` still wins.
+
+### Variants
+
+Two switches in every problem YAML select how hard the learning task is. The defaults are the
+original benchmarks.
+
+| Switch | Values | Default |
+|---|---|---|
+| `inputs` | `simple`, `rich` | `simple` |
+| `output_param` | `constrained`, `unscaled`, `direct` | `constrained` |
+
+| `output_param` | Prediction | Modes |
+|---|---|---|
+| `constrained` | u = g + φ·s·NN, s = `output_scale(inputs)` per sample or 1 | all |
+| `unscaled` | u = g + φ·c·NN, c = `output_scale_global` per channel from the YAML (default 1) | all |
+| `direct` | u = c·NN, no boundary values | `data` only |
+
+g and φ come from `boundary()`, where φ is only the fixed shape part such as x(1−x). Only
+`beam_1d` has a per-sample scale s = (w_c, M_c). `output_scale_global` is the RMS of each
+output over a large sample of the input family, rounded. Loss normalizations (`data_scale()`, residual
+scaling) may still depend on the inputs per sample; they act on the loss, not on the output.
+`direct` is refused in `physics` and `hybrid`: without the hard constraint and without a
+boundary loss the PDE does not determine the solution.
+
+Every problem class has a `WRAPPER_VERSION`, increased by hand whenever g, φ or the output
+scaling change. `metrics.json` and `history.json` store `wrapper_version`, `inputs` and
+`output_param`, and `evaluate.py` refuses a run whose values differ from the current code: a
+checkpoint holds only NN, so the old heat_1d checkpoints (φ = t·x(1−x), version 1) gave about
+2280 % error with the current wrapper (version 2).
+
+## Restore points (Sicherungspunkte)
+
+The state after Phase 3 is tagged `pre-variants` (on `main`); the variant work lives on
+`feature/variants`. The outputs of that state are archived outside the repository.
+
+```bash
+git checkout main                  # or: git checkout pre-variants
+git branch -D feature/variants     # discard the variant branch (from main)
+tar -xzf ../pino-outputs-pre-variants.tar.gz   # restore outputs/ (run in the repository root)
+```
 
 ## Benchmarks
 

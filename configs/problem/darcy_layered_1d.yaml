@@ -12,6 +12,11 @@ length: 10.0         # m
 head_drop: 1.0       # m
 k_ref: 1.0e-5        # m/s
 
+# Variants (see README). Defaults reproduce the original benchmark.
+inputs: simple               # simple | rich
+output_param: constrained    # constrained | unscaled | direct (data mode only)
+output_scale_global: null    # c per output channel for unscaled and direct; null = 1
+
 train_resolution: 64
 test_resolution: 64
 resolution_study: [32, 64, 128, 256]

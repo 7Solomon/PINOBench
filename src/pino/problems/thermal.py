@@ -25,6 +25,9 @@ class Heat1D(Problem):
     The grid has shape ``(2, Nx, Nt)`` with the channels ``x`` and ``t``.
     """
 
+    # 1: phi = t x (1 - x) (until Phase 2); 2: dirichlet_1d_t, phi = tau x (1 - x).
+    WRAPPER_VERSION = "2"
+
     n_dims = 2
     in_channels = 3  # T0(x), x, t / t_end
     out_channels = 1

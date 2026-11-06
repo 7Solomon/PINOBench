@@ -1,6 +1,9 @@
 """Evaluate a finished run again and rewrite its metrics and plots.
 
-Usage: ``python scripts/evaluate.py outputs/heat_1d/physics/<timestamp> [--device cpu]``
+Usage: ``python scripts/evaluate.py outputs/heat_1d/physics/<timestamp> [--device cpu] [--allow-legacy]``
+
+The run's ``wrapper_version``, ``inputs`` and ``output_param`` must match the current code.
+Runs written before these fields existed are refused unless ``--allow-legacy`` is given.
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ from pathlib import Path
 import torch
 from omegaconf import OmegaConf, open_dict
 
-from pino.evaluation import evaluate_model, write_metrics
+from pino.evaluation import IncompatibleRunError, check_run_compatibility, evaluate_model, write_metrics
 from pino.losses import overridden_keys, resolve_loss_weights
 from pino.models.factory import build_model, count_parameters
 from pino.problems import build_problem
@@ -25,6 +28,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dir", type=Path, help="Hydra run directory of a finished training")
     parser.add_argument("--device", default="auto")
+    parser.add_argument(
+        "--allow-legacy",
+        action="store_true",
+        help="evaluate runs without wrapper_version, assuming they used the current wrapper",
+    )
     args = parser.parse_args()
 
     cfg = OmegaConf.load(args.run_dir / ".hydra" / "config.yaml")
@@ -33,6 +41,10 @@ def main() -> None:
     device = select_device(args.device)
 
     problem = build_problem(cfg.problem)
+    try:
+        check_run_compatibility(history, problem, args.allow_legacy)
+    except IncompatibleRunError as error:
+        raise SystemExit(f"Refusing to evaluate {args.run_dir}: {error}") from None
     overrides = overridden_keys(OmegaConf.load(args.run_dir / ".hydra" / "overrides.yaml"))
     with open_dict(cfg):
         cfg.training.weights = OmegaConf.create(resolve_loss_weights(cfg.training, cfg.problem, overrides))

@@ -13,6 +13,11 @@ t_end: 0.05
 length_mm: 200.0
 diffusivity_ref: 1.0e-12  # m^2/s
 
+# Variants (see README). Defaults reproduce the original benchmark.
+inputs: simple               # simple | rich
+output_param: constrained    # constrained | unscaled | direct (data mode only)
+output_scale_global: null    # c per output channel for unscaled and direct; null = 1
+
 train_resolution: 64
 test_resolution: 64
 resolution_study: [32, 64, 128, 256]

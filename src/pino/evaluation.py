@@ -15,8 +15,8 @@ from pino.problems.base import Problem
 
 
 def predict(model: nn.Module, problem: Problem, inputs: Tensor, grid: Tensor) -> Tensor:
-    """Evaluate the model on ``inputs`` and apply the problem's hard constraint."""
-    g, phi = problem.boundary(inputs, grid)
+    """Evaluate the model on ``inputs`` and apply the problem's output parametrization."""
+    g, phi = problem.output_parametrization(inputs, grid)
     return apply_hard_constraint(model(problem.to_fno_input(inputs, grid)), g, phi)
 
 
@@ -141,6 +141,36 @@ def evaluate_model(model: nn.Module, problem: Problem, cfg, device: torch.device
     )
 
 
+class IncompatibleRunError(ValueError):
+    """A stored run was trained with a different output wrapper than the current code."""
+
+
+def check_run_compatibility(stored: dict, problem: Problem, allow_legacy: bool = False) -> None:
+    """Refuse to evaluate a checkpoint whose wrapper differs from the current one.
+
+    ``stored`` is the ``history.json`` or ``metrics.json`` of the run. A checkpoint only
+    holds the network ``NN``; the prediction ``g + phi NN`` also needs the wrapper it was
+    trained with. Runs written before the wrapper version existed are refused unless
+    ``allow_legacy`` is set.
+    """
+    current = problem.variant_metadata()
+    if "wrapper_version" not in stored:
+        if allow_legacy:
+            return
+        raise IncompatibleRunError(
+            f"The run has no wrapper_version (written before it was introduced). The current "
+            f"{problem.name} wrapper is version {current['wrapper_version']}. If you know the run "
+            "used this wrapper, pass --allow-legacy."
+        )
+    differences = {key: (stored.get(key), value) for key, value in current.items() if stored.get(key) != value}
+    if differences:
+        detail = ", ".join(f"{key}: run {old!r}, code {new!r}" for key, (old, new) in differences.items())
+        raise IncompatibleRunError(
+            f"The run was trained with a different {problem.name} wrapper ({detail}). Evaluating it "
+            "with the current code would give wrong results."
+        )
+
+
 def write_metrics(
     path: Path,
     result: EvaluationResult,
@@ -163,6 +193,7 @@ def write_metrics(
         "model": cfg.model.name,
         "seed": int(cfg.seed),
         "timestamp": timestamp,
+        **problem.variant_metadata(),
         "main_variable": problem.main_variable,
         "rel_l2": summarize_errors(result.main_errors),
         "rel_l2_per_variable": summarize_per_variable(problem, result.errors),

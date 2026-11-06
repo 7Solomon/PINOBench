@@ -40,6 +40,8 @@ class DarcyLayered1D(_Stationary1D):
     ``log10 k(x)`` and ``x``.
     """
 
+    WRAPPER_VERSION = "1"
+
     in_channels = 2  # log10 k(x), x
     variable_names = {"coordinates": ["x"], "solution": ["h"]}
     units = {"x": "m", "h": "m"}
@@ -110,6 +112,8 @@ class RichardsSteady1D(_Stationary1D):
     relative to ``L``, ``alpha`` to ``1 / L`` and conductivities and fluxes to ``Ks``.
     """
 
+    WRAPPER_VERSION = "1"
+
     in_channels = 3  # alpha, q / Ks, z
     variable_names = {"coordinates": ["z"], "solution": ["h"]}
     units = {"z": "m", "h": "m"}
@@ -164,6 +168,8 @@ class DarcyPoisson2D(Problem):
     conductivity (unit ``1/m``), ``-Laplace h = f`` becomes ``-Laplace_hat h_hat = f L^2 / H``,
     so the normalized source is ``f_hat = f L^2 / H`` and ``f = f_hat H / L^2``.
     """
+
+    WRAPPER_VERSION = "1"
 
     n_dims = 2
     in_channels = 3  # f, x, y

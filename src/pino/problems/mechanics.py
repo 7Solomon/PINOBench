@@ -25,9 +25,12 @@ class Beam1D(Problem):
 
     Characteristic sizes per sample, from the uniform load with the same mean
     ``q_mean = q0 + q1 / 2``: ``M_c = q_mean / 8`` and ``w_c = 5 q_mean / (384 EI)``.
-    They scale the network output, the data loss and the residuals, so that both outputs
-    count alike although ``w`` is about ten times smaller than ``M``.
+    They scale the network output (``output_scale``, only for ``output_param = constrained``),
+    the data loss (``data_scale``) and the residuals, so that both outputs count alike
+    although ``w`` is about ten times smaller than ``M``.
     """
+
+    WRAPPER_VERSION = "1"
 
     n_dims = 1
     in_channels = 3  # q(x), EI, x
@@ -75,16 +78,23 @@ class Beam1D(Problem):
         return torch.stack([curvature / (q_mean / 8 / stiffness), equilibrium / q_mean], dim=1)
 
     def boundary(self, inputs: Tensor, grid: Tensor) -> tuple[Tensor, Tensor]:
-        """``w = x (1 - x) w_c NN_w`` and ``M = x (1 - x) M_c NN_M``.
-
-        The constraint is ``x (1 - x) NN``. The factors ``w_c`` and ``M_c`` only rescale the
-        network output to order one and leave the constraint itself unchanged.
-        """
+        """``g = 0`` and ``phi = x (1 - x)`` for both ``w`` and ``M``."""
         zeros = torch.zeros(inputs.shape[0], self.out_channels, dtype=inputs.dtype, device=inputs.device)
-        g, phi = dirichlet_1d(grid[0], zeros, zeros)
-        return g, phi * self.data_scale(inputs, grid)
+        return dirichlet_1d(grid[0], zeros, zeros)
+
+    def output_scale(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        """``[w_c, M_c]`` per sample: ``w = x (1 - x) w_c NN_w``, ``M = x (1 - x) M_c NN_M``.
+
+        Brings the network output to order one. Only used by ``output_param = constrained``.
+        """
+        return self.characteristic_sizes(inputs)
 
     def data_scale(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        """Loss weighting with the same ``[w_c, M_c]``; acts on the data loss only."""
+        return self.characteristic_sizes(inputs)
+
+    def characteristic_sizes(self, inputs: Tensor) -> Tensor:
+        """``[w_c, M_c] = [5 q_mean / (384 EI), q_mean / 8]``, shape ``(B, 2, 1)``."""
         q_mean = self._mean_load(inputs)
         w_c = 5 * q_mean / (384 * inputs[:, 2])
         return torch.stack([w_c, q_mean / 8], dim=1)[..., None]

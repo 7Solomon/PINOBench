@@ -314,20 +314,31 @@ def plot_run(problem: Problem, result: EvaluationResult, history: dict, mode: st
 
 
 def plot_summary(rows: list[dict], path: Path) -> None:
-    """Grouped bars of the mean error per benchmark and mode (log axis, 5 % line)."""
-    benchmarks = sorted({row["benchmark"] for row in rows})
+    """Grouped bars of the mean error per benchmark (and variant) and mode (log axis, 5 % line).
+
+    Error bars span the minimum and maximum over the seeds where rows carry them.
+    """
+    labels = list(dict.fromkeys(row.get("label", row["benchmark"]) for row in rows))
     modes = [mode for mode in ("physics", "data", "hybrid") if any(row["mode"] == mode for row in rows)]
     width = 0.8 / max(len(modes), 1)
 
-    fig, ax = plt.subplots(figsize=(max(5.0, 2.2 * len(benchmarks) + 2), 3.8), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(max(5.0, 2.2 * len(labels) + 2), 3.8), constrained_layout=True)
     for offset, (mode, color) in enumerate(zip(modes, SERIES_COLORS)):
-        values = {row["benchmark"]: row["rel_l2_mean"] for row in rows if row["mode"] == mode}
-        positions = [i - 0.4 + width * (offset + 0.5) for i, b in enumerate(benchmarks) if b in values]
-        heights = [values[b] for b in benchmarks if b in values]
-        bars = ax.bar(positions, heights, width=width * 0.9, color=color, label=mode)
+        values = {row.get("label", row["benchmark"]): row["rel_l2_mean"] for row in rows if row["mode"] == mode}
+        positions = [i - 0.4 + width * (offset + 0.5) for i, b in enumerate(labels) if b in values]
+        heights = [values[b] for b in labels if b in values]
+        spread = {
+            row.get("label", row["benchmark"]): (row["rel_l2_mean"] - row.get("rel_l2_min", row["rel_l2_mean"]),
+                                                  row.get("rel_l2_max", row["rel_l2_mean"]) - row["rel_l2_mean"])
+            for row in rows
+            if row["mode"] == mode
+        }
+        errors = [[spread[b][0] for b in labels if b in values], [spread[b][1] for b in labels if b in values]]
+        bars = ax.bar(positions, heights, width=width * 0.9, color=color, label=mode, yerr=errors,
+                      error_kw={"elinewidth": 0.8, "capsize": 2, "ecolor": REFERENCE_COLOR})
         ax.bar_label(bars, labels=[f"{100 * h:.2f} %" for h in heights], fontsize=7, padding=2)
     ax.axhline(TARGET_REL_L2, color=REFERENCE_COLOR, linestyle="--", linewidth=1, label="5 %")
-    ax.set_xticks(range(len(benchmarks)), benchmarks)
+    ax.set_xticks(range(len(labels)), labels)
     ax.set(yscale="log", ylabel="rel. L2 (Testset, Mittel)", title="Übersicht aller Benchmarks")
     ax.grid(axis="x", visible=False)
     _percent_axis(ax)

@@ -61,6 +61,8 @@ class TrainingResult:
     """History of a run. ``best_state`` holds the weights of the best validation score."""
 
     selection: str = "val_rel_l2_all"
+    #: ``wrapper_version``, ``inputs`` and ``output_param`` of the problem.
+    variant: dict[str, str] = field(default_factory=dict)
     loss_epochs: list[int] = field(default_factory=list)
     losses: dict[str, list[float]] = field(default_factory=dict)
     eval_epochs: list[int] = field(default_factory=list)
@@ -78,6 +80,7 @@ class TrainingResult:
     def history(self) -> dict:
         """Return everything except the weights, ready for JSON."""
         return {
+            **self.variant,
             "selection": self.selection,
             "loss_epochs": self.loss_epochs,
             "losses": self.losses,
@@ -133,6 +136,7 @@ def train(
     score improves and once more at the end, so an interrupted run keeps its best model.
     """
     training = cfg.training
+    problem.check_mode(training.mode)
     seed = int(cfg.seed)
     batch_size = int(training.batch_size)
     train_set = build_dataset(
@@ -158,7 +162,7 @@ def train(
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     names = problem.variable_names["solution"]
 
-    result = TrainingResult(selection=selection_criterion(training.mode))
+    result = TrainingResult(selection=selection_criterion(training.mode), variant=problem.variant_metadata())
     start = time.perf_counter()
     for epoch in range(1, epochs + 1):
         model.train()

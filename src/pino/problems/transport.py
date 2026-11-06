@@ -31,6 +31,8 @@ class Chloride1D(Problem):
     Non-dimensionalization: ``x = x_hat L``, ``D = D_hat D_ref``, ``t = t_hat L^2 / D_ref``.
     """
 
+    WRAPPER_VERSION = "1"
+
     n_dims = 2
     in_channels = 4  # Cs, D, x, tau
     out_channels = 1
