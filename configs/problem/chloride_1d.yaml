@@ -1,0 +1,18 @@
+# Chloride ingress dC/dt = D d2C/dx2 on x in [0, 1], t in [t_start, t_end] (Crank, C0 = 0)
+# C(0, t) = Cs, C(1, t) and C(x, t_start) from C = Cs erfc(x / (2 sqrt(D t)))
+name: chloride_1d
+surface_low: 0.5      # Cs in M.-%/binder
+surface_high: 1.0
+diffusivity_low: 0.2  # D / D_ref
+diffusivity_high: 1.0
+t_start: 0.01         # t D_ref / L^2
+t_end: 0.05
+
+# Reference values: x = x_hat L, D = D_hat D_ref, t = t_hat L^2 / D_ref.
+# L^2 / D_ref = 0.04 m^2 / 1e-12 m^2/s = 4e10 s = 1267.5 a, so t in [12.7, 63.4] a.
+length_mm: 200.0
+diffusivity_ref: 1.0e-12  # m^2/s
+
+train_resolution: 64
+test_resolution: 64
+resolution_study: [32, 64, 128, 256]
