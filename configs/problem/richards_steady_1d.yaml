@@ -1,0 +1,15 @@
+# Steady Richards equation, Gardner model: d/dz [K(h) (dh/dz + 1)] = 0 on z in [0, 1] (z up)
+# K = Ks exp(alpha h), water table h(0) = 0, h(1) from the analytical solution.
+name: richards_steady_1d
+alpha_low: 1.0       # alpha L
+alpha_high: 5.0
+flux_low: -0.9       # q / Ks, negative = infiltration downward
+flux_high: -0.1
+
+# Reference values: z = z_hat L, h = h_hat L, alpha = alpha_hat / L, q = q_hat Ks.
+length: 1.0          # m
+ks: 1.0e-5           # m/s
+
+train_resolution: 64
+test_resolution: 64
+resolution_study: [32, 64, 128, 256]

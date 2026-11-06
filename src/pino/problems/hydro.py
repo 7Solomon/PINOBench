@@ -1,4 +1,4 @@
-"""Groundwater benchmarks."""
+"""Groundwater and unsaturated-flow benchmarks."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from collections.abc import Sequence
 import torch
 from torch import Tensor
 
-from pino.analytical.porous_media import layered_darcy_head
+from pino.analytical.porous_media import gardner_steady_head, layered_darcy_head
 from pino.numerics.constraints import dirichlet_1d
-from pino.numerics.derivatives import face_flux
+from pino.numerics.derivatives import conservative_divergence, face_flux
 from pino.numerics.grids import as_resolution, grid_spacing, uniform_grid
 from pino.problems.base import Problem
 from pino.problems.registry import register_problem
@@ -94,3 +94,54 @@ class DarcyLayered1D(_Stationary1D):
         x = grid[0]
         k = torch.where(x < inputs[:, 2, None], inputs[:, 0, None], inputs[:, 1, None])
         return torch.stack([torch.log10(k), x.expand_as(k)], dim=1)
+
+
+@register_problem("richards_steady_1d")
+class RichardsSteady1D(_Stationary1D):
+    """Steady Richards equation ``d/dz [K(h) (dh/dz + 1)] = 0`` with Gardner ``K = Ks exp(alpha h)``.
+
+    ``z`` points up from the water table, ``h(0) = 0``. ``h(1)`` is taken from the analytical
+    solution. Operator inputs are ``(alpha, q / Ks)`` with shape ``(B, 2)``. Lengths are
+    relative to ``L``, ``alpha`` to ``1 / L`` and conductivities and fluxes to ``Ks``.
+    """
+
+    in_channels = 3  # alpha, q / Ks, z
+    variable_names = {"coordinates": ["z"], "solution": ["h"]}
+    units = {"z": "m", "h": "m"}
+
+    def __init__(self, cfg) -> None:
+        self.alpha_range = (float(cfg.alpha_low), float(cfg.alpha_high))
+        self.flux_range = (float(cfg.flux_low), float(cfg.flux_high))
+        self.scales = {"z": float(cfg.length), "h": float(cfg.length)}
+
+    def sample_inputs(self, n: int, generator: torch.Generator) -> Tensor:
+        ranges = torch.tensor([self.alpha_range, self.flux_range])
+        return ranges[:, 0] + (ranges[:, 1] - ranges[:, 0]) * torch.rand(n, 2, generator=generator)
+
+    def analytical(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        return gardner_steady_head(inputs[:, 0], inputs[:, 1], grid[0]).unsqueeze(1)
+
+    def residual(self, u: Tensor, inputs: Tensor, grid: Tensor) -> Tensor:
+        """Return ``d/dz [K (dh/dz + 1)] / Ks`` at the interior nodes.
+
+        ``K`` on a face is the arithmetic mean of its two nodes. Dividing by ``Ks`` makes the
+        residual non-dimensional. ``K / Ks`` lies in ``(0, 1]`` and the flux in ``[-0.9, -0.1]``,
+        so no further scaling is needed.
+        """
+        alpha = inputs[:, 0, None, None]
+        conductivity = torch.exp(alpha * u)  # K / Ks
+        k_faces = 0.5 * (conductivity[..., 1:] + conductivity[..., :-1])
+        return conservative_divergence(u, k_faces, grid_spacing(grid, 0), gravity=1.0)
+
+    def boundary(self, inputs: Tensor, grid: Tensor) -> tuple[Tensor, Tensor]:
+        """``h = h(1) z + z (1 - z) NN``, with ``h(1)`` from the analytical solution."""
+        top = torch.ones(1, dtype=inputs.dtype, device=inputs.device)
+        head_top = gardner_steady_head(inputs[:, 0], inputs[:, 1], top)
+        return dirichlet_1d(grid[0], torch.zeros_like(head_top), head_top)
+
+    def to_fno_input(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        z = grid[0]
+        batch = inputs.shape[0]
+        alpha = inputs[:, 0, None].expand(-1, z.shape[0])
+        flux = inputs[:, 1, None].expand(-1, z.shape[0])
+        return torch.stack([alpha, flux, z.expand(batch, -1)], dim=1)

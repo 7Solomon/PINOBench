@@ -1,4 +1,4 @@
-"""darcy_layered_1d: closed-form solution, residual and constraint."""
+"""darcy_layered_1d and richards_steady_1d: closed-form solutions, residuals, constraints."""
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
-from pino.analytical.porous_media import layered_darcy_flux, layered_darcy_head
+from pino.analytical.porous_media import gardner_steady_head, layered_darcy_flux, layered_darcy_head
 from pino.evaluation import predict
 from pino.models.factory import build_model
 from pino.problems import build_problem
@@ -109,3 +109,55 @@ def test_darcy_shapes_and_hard_constraint():
     u = predict(build_model(MODEL_CFG, problem, 16), problem, inputs, grid)
     assert u.shape == (3, 1, 16)
     assert (u[..., 0] == 1).all() and (u[..., -1] == 0).all()
+
+
+# --- richards_steady_1d -------------------------------------------------------------------
+
+
+def _soils(batch=8):
+    generator = torch.Generator().manual_seed(0)
+    alpha = 1 + 4 * torch.rand(batch, generator=generator).double()
+    flux = -0.9 + 0.8 * torch.rand(batch, generator=generator).double()
+    return alpha, flux
+
+
+def test_richards_head_is_non_positive_and_zero_at_water_table():
+    alpha, flux = _soils()
+    head = gardner_steady_head(alpha, flux, torch.linspace(0, 1, 101, dtype=torch.float64))
+    assert (head <= 0).all()
+    assert head[:, 0].abs().max() < 1e-15
+
+
+def test_richards_flux_is_constant_and_pde_holds_via_autograd():
+    alpha, flux = _soils()
+    for b in range(len(alpha)):
+        z = torch.rand(50, dtype=torch.float64, requires_grad=True)
+        head = gardner_steady_head(alpha[b : b + 1], flux[b : b + 1], z)[0]
+        slope = torch.autograd.grad(head.sum(), z, create_graph=True)[0]
+        darcy_flux = -torch.exp(alpha[b] * head) * (slope + 1)
+        assert torch.allclose(darcy_flux, flux[b].expand_as(darcy_flux), atol=1e-12)
+        divergence = torch.autograd.grad(darcy_flux.sum(), z)[0]
+        assert divergence.abs().max() < 1e-10
+
+
+def test_richards_fd_residual_is_small_and_converges(float64):
+    problem = _problem("richards_steady_1d")
+    inputs = problem.sample_inputs(16, torch.Generator().manual_seed(0))
+    norms = []
+    for resolution in (32, 64, 128, 256):
+        grid = problem.grid(resolution)
+        norms.append(problem.residual(problem.analytical(inputs, grid), inputs, grid).pow(2).mean().sqrt().item())
+    assert norms[1] < 1e-2
+    for coarse, fine in zip(norms, norms[1:]):
+        assert coarse / fine == pytest.approx(4, rel=0.15)
+
+
+def test_richards_shapes_and_hard_constraint():
+    problem = _problem("richards_steady_1d")
+    inputs = problem.sample_inputs(3, torch.Generator().manual_seed(0))
+    grid = problem.grid(16)
+    assert problem.to_fno_input(inputs, grid).shape == (3, 3, 16)
+    u = predict(build_model(MODEL_CFG, problem, 16), problem, inputs, grid)
+    exact = problem.analytical(inputs, grid)
+    assert (u[..., 0] == 0).all()
+    assert torch.allclose(u[..., -1], exact[..., -1])
