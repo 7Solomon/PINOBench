@@ -8,9 +8,10 @@ from pathlib import Path
 
 import hydra
 from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf, open_dict
 
 from pino.evaluation import evaluate_model, write_metrics
+from pino.losses import overridden_keys, resolve_loss_weights
 from pino.models.factory import build_model, count_parameters
 from pino.problems import build_problem
 from pino.trainer import select_device, set_seed, train
@@ -26,13 +27,24 @@ def main(cfg: DictConfig) -> None:
     device = select_device(cfg.device)
 
     problem = build_problem(cfg.problem)
+    overrides = overridden_keys(HydraConfig.get().overrides.task)
+    with open_dict(cfg):
+        cfg.training.weights = OmegaConf.create(resolve_loss_weights(cfg.training, cfg.problem, overrides))
     model = build_model(cfg.model, problem, cfg.problem.train_resolution).to(device)
     n_parameters = count_parameters(model)
-    log.info("%s, mode %s, %d parameters on %s", problem.name, cfg.training.mode, n_parameters, device)
+    log.info(
+        "%s, mode %s, weights %s, %d parameters on %s",
+        problem.name,
+        cfg.training.mode,
+        dict(cfg.training.weights),
+        n_parameters,
+        device,
+    )
 
     outcome = train(model, problem, cfg, device, run_dir)
     history = outcome.history()
 
+    # The test set is evaluated exactly once, with the checkpoint chosen on the validation set.
     model.load_state_dict(outcome.best_state)
     result = evaluate_model(model, problem, cfg, device)
     metrics = write_metrics(
@@ -44,6 +56,7 @@ def main(cfg: DictConfig) -> None:
         outcome.best_epoch,
         n_parameters,
         datetime.now().isoformat(timespec="seconds"),
+        history,
     )
     plot_run(problem, result, history, cfg.training.mode, int(cfg.problem.train_resolution), run_dir)
     log.info("rel. L2 %s, time %.0f s, results in %s", metrics["rel_l2"], outcome.training_time_s, run_dir)

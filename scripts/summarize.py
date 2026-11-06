@@ -1,7 +1,8 @@
 """Collect ``metrics.json`` files into ``summary.csv``, ``summary.md`` and ``summary.png``.
 
-If a benchmark and mode were run several times, the most recent run is used. All error
-columns refer to the main variable of each benchmark.
+If a benchmark and mode were run several times, the most recent run is used. Runs below
+``outputs/_superseded/`` are ignored. All error columns refer to the main variable of each
+benchmark.
 
 Usage: ``python scripts/summarize.py [--outputs outputs]``
 """
@@ -25,6 +26,7 @@ COLUMNS = {
     "training_time_s": "Zeit [s]",
     "n_parameters": "Parameter",
 }
+SUPERSEDED = "_superseded"
 MODE_ORDER = {"physics": 0, "data": 1, "hybrid": 2}
 
 
@@ -32,6 +34,8 @@ def collect(outputs: Path) -> list[dict]:
     """Return one row per benchmark and mode, taken from the most recent run."""
     latest: dict[tuple[str, str], dict] = {}
     for path in outputs.rglob("metrics.json"):
+        if SUPERSEDED in path.relative_to(outputs).parts:
+            continue
         metrics = json.loads(path.read_text())
         key = (metrics["benchmark"], metrics["mode"])
         if key not in latest or metrics["timestamp"] > latest[key]["timestamp"]:

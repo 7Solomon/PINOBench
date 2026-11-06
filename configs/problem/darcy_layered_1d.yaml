@@ -15,3 +15,10 @@ k_ref: 1.0e-5        # m/s
 train_resolution: 64
 test_resolution: 64
 resolution_study: [32, 64, 128, 256]
+
+# Hybrid mode only: replaces training.weights. The data loss is about 1e-7 against a physics
+# loss of about 1e-4, so with 1:1 the hybrid run is physics-dominated. A command-line
+# override of training.weights.<term> still wins.
+loss_weights:
+  physics: 1.0
+  data: 300.0

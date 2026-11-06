@@ -1,4 +1,8 @@
-"""Training loop: Adam, cosine schedule, best checkpoint by relative L2 on the test set."""
+"""Training loop: Adam, cosine schedule, best checkpoint on a separate validation set.
+
+The test set is never touched here. It is evaluated once, after training, with the best
+checkpoint (see ``scripts/train.py``).
+"""
 
 from __future__ import annotations
 
@@ -18,7 +22,7 @@ from torch import Tensor, nn
 from torch.utils.data import DataLoader
 
 from pino.data.dataset import build_dataset
-from pino.evaluation import predict, predict_dataset, test_seed
+from pino.evaluation import predict, validate, validation_seed
 from pino.losses import compute_loss, uses_data
 from pino.problems.base import Problem
 
@@ -43,28 +47,46 @@ def select_device(name: str = "auto") -> torch.device:
     return torch.device(name)
 
 
+def selection_criterion(mode: str) -> str:
+    """Name of the validation quantity that selects the checkpoint in ``mode``.
+
+    ``physics`` selects by the physics loss, so the analytical solution plays no role in that
+    mode. ``data`` and ``hybrid`` select by the mean relative L2 over all output variables.
+    """
+    return "val_physics" if mode == "physics" else "val_rel_l2_all"
+
+
 @dataclass
 class TrainingResult:
-    """History of a run. ``best_state`` holds the weights of the best test error."""
+    """History of a run. ``best_state`` holds the weights of the best validation score."""
 
+    selection: str = "val_rel_l2_all"
     loss_epochs: list[int] = field(default_factory=list)
     losses: dict[str, list[float]] = field(default_factory=dict)
     eval_epochs: list[int] = field(default_factory=list)
-    test_rel_l2: list[float] = field(default_factory=list)
+    #: Validation physics loss, ``mean(residual^2)``.
+    val_physics: list[float] = field(default_factory=list)
+    #: Mean validation rel. L2 over all output variables.
+    val_rel_l2_all: list[float] = field(default_factory=list)
+    #: Mean validation rel. L2 per output variable. In ``physics`` mode for observation only.
+    val_rel_l2: dict[str, list[float]] = field(default_factory=dict)
     best_epoch: int = -1
-    best_rel_l2: float = float("inf")
+    best_score: float = float("inf")
     training_time_s: float = 0.0
     best_state: dict[str, Tensor] | None = None
 
     def history(self) -> dict:
         """Return everything except the weights, ready for JSON."""
         return {
+            "selection": self.selection,
             "loss_epochs": self.loss_epochs,
             "losses": self.losses,
             "eval_epochs": self.eval_epochs,
-            "test_rel_l2": self.test_rel_l2,
+            "val_physics": self.val_physics,
+            "val_rel_l2_all": self.val_rel_l2_all,
+            "val_rel_l2": self.val_rel_l2,
             "best_epoch": self.best_epoch,
-            "best_rel_l2": self.best_rel_l2,
+            "best_score": self.best_score,
             "training_time_s": self.training_time_s,
         }
 
@@ -107,11 +129,12 @@ def train(
 ) -> TrainingResult:
     """Train ``model`` according to ``cfg`` and return its history and best weights.
 
-    With ``run_dir``, the best weights and the history are written whenever the test error
-    improves and once more at the end, so an interrupted run keeps its best model.
+    With ``run_dir``, the best weights and the history are written whenever the validation
+    score improves and once more at the end, so an interrupted run keeps its best model.
     """
     training = cfg.training
     seed = int(cfg.seed)
+    batch_size = int(training.batch_size)
     train_set = build_dataset(
         problem,
         int(training.n_train),
@@ -119,10 +142,12 @@ def train(
         seed,
         with_targets=uses_data(training.mode),
     )
-    test_set = build_dataset(problem, int(training.n_test), cfg.problem.test_resolution, test_seed(seed))
+    # The validation targets are needed in every mode for the logged rel. L2. In ``physics``
+    # mode they never enter the loss or the checkpoint selection.
+    val_set = build_dataset(problem, int(training.n_val), cfg.problem.train_resolution, validation_seed(seed))
     loader = DataLoader(
         train_set,
-        batch_size=int(training.batch_size),
+        batch_size=batch_size,
         shuffle=True,
         generator=torch.Generator().manual_seed(seed),
     )
@@ -131,8 +156,9 @@ def train(
     optimizer = torch.optim.Adam(model.parameters(), lr=float(training.lr))
     epochs = int(training.epochs)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    names = problem.variable_names["solution"]
 
-    result = TrainingResult()
+    result = TrainingResult(selection=selection_criterion(training.mode))
     start = time.perf_counter()
     for epoch in range(1, epochs + 1):
         model.train()
@@ -150,25 +176,30 @@ def train(
             result.losses.setdefault(name, []).append(value / len(loader))
 
         if epoch % int(training.eval_every) == 0 or epoch == epochs:
-            _, errors = predict_dataset(model, problem, test_set, device, int(training.batch_size))
-            error = errors[:, problem.main_channel].mean().item()
+            validation = validate(model, problem, val_set, device, batch_size)
             result.eval_epochs.append(epoch)
-            result.test_rel_l2.append(error)
-            improved = error < result.best_rel_l2
+            result.val_physics.append(validation.physics)
+            result.val_rel_l2_all.append(validation.errors.mean().item())
+            for channel, name in enumerate(names):
+                result.val_rel_l2.setdefault(name, []).append(validation.errors[:, channel].mean().item())
+            score = getattr(result, result.selection)[-1]
+            improved = score < result.best_score
             if improved:
-                result.best_rel_l2 = error
+                result.best_score = score
                 result.best_epoch = epoch
                 result.best_state = copy.deepcopy(model.state_dict())
             result.training_time_s = time.perf_counter() - start
             if run_dir is not None:
                 save_progress(run_dir, result, write_model=improved)
             log.info(
-                "epoch %4d/%d  loss %.3e  test rel. L2 %.3f %%  best %.3f %%  %.0f s",
+                "epoch %4d/%d  loss %.3e  val physics %.3e  val rel. L2 %s %.3f %%  best epoch %d  %.0f s",
                 epoch,
                 epochs,
                 result.losses["total"][-1],
-                100 * error,
-                100 * result.best_rel_l2,
+                validation.physics,
+                problem.main_variable,
+                100 * result.val_rel_l2[problem.main_variable][-1],
+                result.best_epoch,
                 time.perf_counter() - start,
             )
     result.training_time_s = time.perf_counter() - start

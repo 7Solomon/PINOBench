@@ -11,9 +11,10 @@ from datetime import datetime
 from pathlib import Path
 
 import torch
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, open_dict
 
 from pino.evaluation import evaluate_model, write_metrics
+from pino.losses import overridden_keys, resolve_loss_weights
 from pino.models.factory import build_model, count_parameters
 from pino.problems import build_problem
 from pino.trainer import select_device, set_seed
@@ -32,6 +33,9 @@ def main() -> None:
     device = select_device(args.device)
 
     problem = build_problem(cfg.problem)
+    overrides = overridden_keys(OmegaConf.load(args.run_dir / ".hydra" / "overrides.yaml"))
+    with open_dict(cfg):
+        cfg.training.weights = OmegaConf.create(resolve_loss_weights(cfg.training, cfg.problem, overrides))
     model = build_model(cfg.model, problem, cfg.problem.train_resolution).to(device)
     state = torch.load(args.run_dir / "best_model.pt", map_location=device, weights_only=False)
     model.load_state_dict(state)
@@ -46,6 +50,7 @@ def main() -> None:
         history["best_epoch"],
         count_parameters(model),
         datetime.now().isoformat(timespec="seconds"),
+        history,
     )
     plot_run(problem, result, history, cfg.training.mode, int(cfg.problem.train_resolution), args.run_dir)
     print(json.dumps(metrics["rel_l2"], indent=2))

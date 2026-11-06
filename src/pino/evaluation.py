@@ -81,8 +81,46 @@ class EvaluationResult:
 
 
 def test_seed(seed: int) -> int:
-    """Seed of the test inputs, different from the training seed."""
+    """Seed of the test inputs, different from the training and validation seeds."""
     return seed + 1000
+
+
+def validation_seed(seed: int) -> int:
+    """Seed of the validation inputs, different from the training and test seeds."""
+    return seed + 2000
+
+
+@dataclass
+class ValidationResult:
+    """Errors against the analytical solution ``(B, C)`` and the mean physics loss."""
+
+    errors: Tensor
+    physics: float
+
+
+@torch.no_grad()
+def validate(
+    model: nn.Module, problem: Problem, dataset: OperatorDataset, device: torch.device, batch_size: int = 32
+) -> ValidationResult:
+    """Evaluate the relative L2 per variable and the physics loss ``mean(residual^2)``.
+
+    The physics loss uses only the inputs, never the analytical solution, so it can select a
+    checkpoint in the ``physics`` mode.
+    """
+    was_training = model.training
+    model.eval()
+    grid = dataset.grid.to(device)
+    errors, squared, count = [], 0.0, 0
+    for start in range(0, len(dataset), batch_size):
+        inputs = dataset.inputs[start : start + batch_size].to(device)
+        target = dataset.targets[start : start + batch_size].to(device)
+        prediction = predict(model, problem, inputs, grid)
+        residual = problem.residual(prediction, inputs, grid)
+        squared += residual.pow(2).sum().item()
+        count += residual.numel()
+        errors.append(relative_l2(prediction, target).cpu())
+    model.train(was_training)
+    return ValidationResult(torch.cat(errors), squared / count)
 
 
 def evaluate_model(model: nn.Module, problem: Problem, cfg, device: torch.device) -> EvaluationResult:
@@ -112,6 +150,7 @@ def write_metrics(
     best_epoch: int,
     n_parameters: int,
     timestamp: str,
+    history: dict | None = None,
 ) -> dict:
     """Write ``metrics.json`` and return its content.
 
@@ -133,6 +172,8 @@ def write_metrics(
         "test_resolution": int(cfg.problem.test_resolution),
         "training_time_s": training_time_s,
         "best_epoch": best_epoch,
+        "selection": (history or {}).get("selection"),
+        "loss_weights": {name: float(value) for name, value in cfg.training.weights.items()},
         "n_parameters": n_parameters,
     }
     Path(path).write_text(json.dumps(metrics, indent=2))

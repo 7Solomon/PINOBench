@@ -62,16 +62,32 @@ def _percent_axis(ax) -> None:
 
 
 def plot_training(history: dict, title: str, path: Path) -> None:
-    """Loss components (left) and test error (right) over the epochs."""
+    """Loss components (left) and validation error (right) over the epochs.
+
+    The left panel adds the validation physics loss. The right panel shows the validation
+    rel. L2 of every output variable. A vertical line marks the selected checkpoint, chosen by
+    ``history["selection"]``: the physics loss in ``physics`` mode, otherwise the mean rel. L2
+    over all variables.
+    """
     fig, (ax_loss, ax_error) = plt.subplots(1, 2, figsize=(9, 3.4), constrained_layout=True)
+    best = history["best_epoch"]
 
     names = [name for name in history["losses"] if name != "total"]
     for name, color in zip(names, SERIES_COLORS):
-        ax_loss.plot(history["loss_epochs"], history["losses"][name], color=color, label=name)
+        ax_loss.plot(history["loss_epochs"], history["losses"][name], color=color, label=f"{name} (Training)")
+    ax_loss.plot(
+        history["eval_epochs"],
+        history["val_physics"],
+        color=SERIES_COLORS[0],
+        linestyle="--",
+        linewidth=1.2,
+        label="physics (Validierung)",
+    )
     ax_loss.set(yscale="log", xlabel="Epoche", ylabel="Loss", title="Loss-Komponenten")
     ax_loss.legend()
 
-    ax_error.plot(history["eval_epochs"], history["test_rel_l2"], color=SERIES_COLORS[0])
+    for (name, values), color in zip(history["val_rel_l2"].items(), SERIES_COLORS):
+        ax_error.plot(history["eval_epochs"], values, color=color, label=name)
     ax_error.axhline(TARGET_REL_L2, color=REFERENCE_COLOR, linestyle="--", linewidth=1)
     ax_error.annotate(
         "5 %",
@@ -82,8 +98,13 @@ def plot_training(history: dict, title: str, path: Path) -> None:
         ha="right",
         color=REFERENCE_COLOR,
     )
-    ax_error.set(yscale="log", xlabel="Epoche", ylabel="rel. L2 (Testset, Mittel)", title="Testfehler")
+    criterion = "physics-Loss" if history["selection"] == "val_physics" else "rel. L2 aller Variablen"
+    for ax in (ax_loss, ax_error):
+        ax.axvline(best, color=REFERENCE_COLOR, linestyle=":", linewidth=1)
+    ax_error.plot([], [], color=REFERENCE_COLOR, linestyle=":", linewidth=1, label=f"Checkpoint ({criterion})")
+    ax_error.set(yscale="log", xlabel="Epoche", ylabel="rel. L2 (Validierung, Mittel)", title="Validierungsfehler")
     _percent_axis(ax_error)
+    ax_error.legend()
 
     fig.suptitle(title)
     _save(fig, path)
@@ -215,7 +236,7 @@ def plot_solution_1d(problem: Problem, result: EvaluationResult, title: str, pat
     _save(fig, path)
 
 
-#: Solution plot for each ``Problem.plot_type``. Add ``"2d"`` and ``"2d_t"`` here.
+#: Solution plot for each ``Problem.plot_type``. ``"2d_t"`` is still missing.
 SOLUTION_PLOTTERS: dict[str, Callable[[Problem, EvaluationResult, str, Path], None]] = {
     "1d": plot_solution_1d,
     "1d_t": plot_solution_1d_t,

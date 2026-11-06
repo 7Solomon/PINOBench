@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import torch
 from torch import Tensor
 
@@ -45,3 +47,36 @@ def compute_loss(
         components["data"] = data.item()
     components["total"] = total.item()
     return total, components
+
+
+def overridden_keys(overrides: Iterable[str]) -> set[str]:
+    """Return the config keys set on the command line, e.g. ``{"training.weights.data"}``.
+
+    Accepts Hydra override strings such as ``training.weights.data=300`` or ``++seed=1``.
+    """
+    return {override.split("=", 1)[0].lstrip("+~") for override in overrides}
+
+
+def resolve_loss_weights(training_cfg, problem_cfg, overridden: Iterable[str] = ()) -> dict[str, float]:
+    """Return the loss weights of a run.
+
+    Order of precedence, highest first:
+
+    1. ``training.weights.<term>`` set on the command line,
+    2. the optional ``loss_weights`` of the problem config,
+    3. ``weights`` of the training config.
+
+    ``loss_weights`` only acts in the ``hybrid`` mode. ``physics`` and ``data`` have a single
+    term whose weight is fixed by the mode, so a problem cannot rescale them.
+    """
+    overridden = set(overridden)
+    weights = {name: float(value) for name, value in training_cfg.weights.items()}
+    problem_weights = problem_cfg.get("loss_weights")
+    if training_cfg.mode != "hybrid" or not problem_weights:
+        return weights
+    for name, value in problem_weights.items():
+        if name not in weights:
+            raise KeyError(f"Unknown loss term '{name}' in loss_weights. Available: {sorted(weights)}")
+        if "training.weights" not in overridden and f"training.weights.{name}" not in overridden:
+            weights[name] = float(value)
+    return weights
