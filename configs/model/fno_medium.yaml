@@ -1,0 +1,5 @@
+name: fno_medium
+n_modes: 24           # per dimension; a scalar is expanded to the problem's dimensionality
+hidden_channels: 64
+n_layers: 4
+domain_padding: 0.25  # fraction per dimension; the benchmarks are not periodic

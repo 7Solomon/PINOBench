@@ -1,0 +1,12 @@
+# dT/dt = a * d2T/dx2 on x in [0, 1], t in [0, t_end], T(0, t) = T(1, t) = 0
+# Operator input: T0(x) = sum_{n=1..N} b_n sin(n pi x), b_n ~ U(coeff_low, coeff_high)
+name: heat_1d
+a: 1.0
+t_end: 0.1
+n_series: 5
+coeff_low: -1.0
+coeff_high: 1.0
+
+train_resolution: 64
+test_resolution: 64
+resolution_study: [32, 64, 128, 256]

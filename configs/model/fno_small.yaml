@@ -1,0 +1,5 @@
+name: fno_small
+n_modes: 16           # per dimension; a scalar is expanded to the problem's dimensionality
+hidden_channels: 32
+n_layers: 4
+domain_padding: 0.25  # fraction per dimension; the benchmarks are not periodic

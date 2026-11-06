@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Run results (Hydra, checkpoints, plots)
+outputs/
+multirun/
+*.pt
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store

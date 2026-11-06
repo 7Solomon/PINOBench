@@ -1,0 +1,10 @@
+mode: physics
+weights:
+  physics: 1.0
+  data: 0.0
+epochs: 500
+batch_size: 32
+lr: 1.0e-3
+n_train: 1000
+n_test: 200
+eval_every: 5
