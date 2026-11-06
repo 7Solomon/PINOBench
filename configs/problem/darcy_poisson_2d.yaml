@@ -1,0 +1,15 @@
+# Stationary groundwater flow -Laplace h = f on [0, 1]^2, h = 0 on the boundary, k = 1
+# f = sum_{m,n=1..M} a_mn sin(m pi x) sin(n pi y), a_mn ~ U(coeff_low, coeff_high)
+name: darcy_poisson_2d
+n_series: 4
+coeff_low: -1.0
+coeff_high: 1.0
+
+# Reference values: x = x_hat L, h = h_hat H. f is the volumetric source divided by the
+# conductivity [1/m]; the normalized source is f_hat = f L^2 / H, so f = f_hat * 0.01 1/m.
+length: 10.0    # m
+head_ref: 1.0   # m
+
+train_resolution: 64
+test_resolution: 64
+resolution_study: [32, 64, 128, 256]

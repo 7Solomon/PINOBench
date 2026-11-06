@@ -236,10 +236,62 @@ def plot_solution_1d(problem: Problem, result: EvaluationResult, title: str, pat
     _save(fig, path)
 
 
+def plot_solution_2d(problem: Problem, result: EvaluationResult, title: str, path: Path) -> None:
+    """Fields over ``(x, y)`` for the best, median and worst example, one row each.
+
+    Panels: analytical and FNO with a shared ``viridis`` scale, the absolute error with its
+    own ``magma`` scale, and a line cut through the grid row closest to ``y = 0.5``.
+    """
+    x_name, y_name = problem.variable_names["coordinates"]
+    u_name = problem.variable_names["solution"][0]
+    x = problem.to_physical(x_name, result.dataset.grid[0, :, 0].numpy())
+    y = problem.to_physical(y_name, result.dataset.grid[1, 0, :].numpy())
+    cut = int(np.argmin(np.abs(result.dataset.grid[1, 0, :].numpy() - 0.5)))
+    extent = (x[0], x[-1], y[0], y[-1])
+    errors = result.main_errors.numpy()
+
+    fig, axes = plt.subplots(
+        3, 4, figsize=(14, 9.6), constrained_layout=True, gridspec_kw={"width_ratios": [1, 1, 1, 1.15]}
+    )
+    for row, (label, index) in zip(axes, _representative_examples(errors)):
+        exact = problem.to_physical(u_name, result.dataset.targets[index, 0].numpy())
+        predicted = problem.to_physical(u_name, result.predictions[index, 0].numpy())
+        error = np.abs(exact - predicted)
+
+        vmin, vmax = min(exact.min(), predicted.min()), max(exact.max(), predicted.max())
+        panels = (
+            ("Analytisch", exact, "viridis", vmin, vmax),
+            ("FNO", predicted, "viridis", vmin, vmax),
+            ("|Fehler|", error, "magma", 0.0, error.max()),
+        )
+        images = []
+        for ax, (name, field, cmap, low, high) in zip(row, panels):
+            image = ax.imshow(field.T, origin="lower", extent=extent, aspect="equal", cmap=cmap, vmin=low, vmax=high)
+            images.append(image)
+            ax.set(xlabel=problem.label(x_name), ylabel=problem.label(y_name), title=name)
+            ax.grid(False)
+        row[0].set_title(f"{label} (rel. L2 = {100 * errors[index]:.2f} %)\nAnalytisch")
+        row[0].axhline(y[cut], color="white", linestyle=":", linewidth=0.8)
+        fig.colorbar(images[1], ax=row[:2], label=problem.label(u_name), shrink=0.9)
+        fig.colorbar(images[2], ax=row[2], label=f"|Fehler| {problem.label(u_name)}", shrink=0.9)
+
+        profile_axis = row[3]
+        profile_axis.plot(x, exact[:, cut], color=SERIES_COLORS[0], label="Analytisch")
+        profile_axis.plot(x, predicted[:, cut], color=SERIES_COLORS[1], linestyle="--", label="FNO")
+        profile_axis.set(
+            xlabel=problem.label(x_name), ylabel=problem.label(u_name), title=f"Schnitt {y_name} = {y[cut]:.3g}"
+        )
+        profile_axis.legend(fontsize=7)
+
+    fig.suptitle(title)
+    _save(fig, path)
+
+
 #: Solution plot for each ``Problem.plot_type``. ``"2d_t"`` is still missing.
 SOLUTION_PLOTTERS: dict[str, Callable[[Problem, EvaluationResult, str, Path], None]] = {
     "1d": plot_solution_1d,
     "1d_t": plot_solution_1d_t,
+    "2d": plot_solution_2d,
 }
 
 

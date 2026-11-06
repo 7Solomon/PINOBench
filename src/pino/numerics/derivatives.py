@@ -10,6 +10,8 @@ from collections.abc import Iterable
 
 from torch import Tensor
 
+from pino.numerics.grids import grid_spacing
+
 
 def central_d1(u: Tensor, h: float, dim: int) -> Tensor:
     """First derivative ``(u[i+1] - u[i-1]) / (2 h)`` along ``dim``."""
@@ -50,6 +52,23 @@ def conservative_divergence(u: Tensor, k_faces: Tensor, h: float, dim: int = -1,
     flux = face_flux(u, k_faces, h, dim, gravity)
     n = flux.shape[dim]
     return (flux.narrow(dim, 1, n - 1) - flux.narrow(dim, 0, n - 1)) / h
+
+
+def laplacian(u: Tensor, grid: Tensor) -> Tensor:
+    """Second-order Laplacian ``sum_d d2u/dx_d^2`` on the interior points of all grid dimensions.
+
+    Works for any number of dimensions: the grid ``(n_dims, *resolution)`` sets the spacing
+    of each axis, and the last ``n_dims`` dimensions of ``u`` are the spatial ones. Each
+    ``central_d2`` is cut to the interior of the other axes, so the result is two entries
+    shorter along every grid dimension.
+    """
+    n_dims = grid.shape[0]
+    dims = list(range(u.dim() - n_dims, u.dim()))
+    total = 0.0
+    for axis, dim in enumerate(dims):
+        others = [d for d in dims if d != dim]
+        total = total + interior(central_d2(u, grid_spacing(grid, axis), dim), others)
+    return total
 
 
 def interior(u: Tensor, dims: Iterable[int]) -> Tensor:

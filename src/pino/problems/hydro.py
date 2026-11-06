@@ -1,4 +1,4 @@
-"""Groundwater and unsaturated-flow benchmarks."""
+"""Groundwater and unsaturated-flow benchmarks in 1D and 2D."""
 
 from __future__ import annotations
 
@@ -8,9 +8,14 @@ from collections.abc import Sequence
 import torch
 from torch import Tensor
 
-from pino.analytical.porous_media import gardner_steady_head, layered_darcy_head
-from pino.numerics.constraints import dirichlet_1d
-from pino.numerics.derivatives import conservative_divergence, face_flux
+from pino.analytical.porous_media import (
+    gardner_steady_head,
+    layered_darcy_head,
+    poisson_sine_head_2d,
+    sine_source_2d,
+)
+from pino.numerics.constraints import dirichlet_1d, dirichlet_2d
+from pino.numerics.derivatives import conservative_divergence, face_flux, interior, laplacian
 from pino.numerics.grids import as_resolution, grid_spacing, uniform_grid
 from pino.problems.base import Problem
 from pino.problems.registry import register_problem
@@ -145,3 +150,66 @@ class RichardsSteady1D(_Stationary1D):
         alpha = inputs[:, 0, None].expand(-1, z.shape[0])
         flux = inputs[:, 1, None].expand(-1, z.shape[0])
         return torch.stack([alpha, flux, z.expand(batch, -1)], dim=1)
+
+
+@register_problem("darcy_poisson_2d")
+class DarcyPoisson2D(Problem):
+    """Stationary groundwater flow ``-Laplace h = f`` on ``[0, 1]^2`` with ``h = 0`` on the boundary.
+
+    Constant conductivity ``k = 1``. The source is ``f = sum_{m,n=1..M} a_mn sin(m pi x) sin(n pi y)``
+    with ``a_mn ~ U(coeff_low, coeff_high)``. Operator inputs are the coefficients ``(B, M, M)``.
+    The network sees ``f``, ``x`` and ``y``.
+
+    Scaling: ``x = x_hat L`` and ``h = h_hat H``. With ``f`` the volumetric source divided by the
+    conductivity (unit ``1/m``), ``-Laplace h = f`` becomes ``-Laplace_hat h_hat = f L^2 / H``,
+    so the normalized source is ``f_hat = f L^2 / H`` and ``f = f_hat H / L^2``.
+    """
+
+    n_dims = 2
+    in_channels = 3  # f, x, y
+    out_channels = 1
+    plot_type = "2d"
+    variable_names = {"coordinates": ["x", "y"], "solution": ["h"]}
+    units = {"x": "m", "y": "m", "h": "m"}
+
+    def __init__(self, cfg) -> None:
+        self.n_series = int(cfg.n_series)
+        self.coeff_range = (float(cfg.coeff_low), float(cfg.coeff_high))
+        self.scales = {"x": float(cfg.length), "y": float(cfg.length), "h": float(cfg.head_ref)}
+
+    def grid(self, resolution: int | Sequence[int]) -> Tensor:
+        return uniform_grid([(0.0, 1.0), (0.0, 1.0)], as_resolution(resolution, self.n_dims))
+
+    def sample_inputs(self, n: int, generator: torch.Generator) -> Tensor:
+        low, high = self.coeff_range
+        return low + (high - low) * torch.rand(n, self.n_series, self.n_series, generator=generator)
+
+    def analytical(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        return poisson_sine_head_2d(inputs, grid[0], grid[1]).unsqueeze(1)
+
+    def source(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        """``f`` on the grid, shape ``(B, 1, Nx, Ny)``."""
+        return sine_source_2d(inputs, grid[0], grid[1]).unsqueeze(1)
+
+    def residual(self, u: Tensor, inputs: Tensor, grid: Tensor) -> Tensor:
+        """Return ``(-Laplace h - f) / ||f||_rms`` on the interior points.
+
+        ``||f||_rms = sqrt(sum a_mn^2) / 2`` is the root mean square of ``f`` over the unit
+        square (the sine modes are orthogonal with mean square ``1/4``). The residual is
+        therefore an error relative to the size of the source of each sample.
+        """
+        f = interior(self.source(inputs, grid), [-2, -1])
+        size = 0.5 * inputs.pow(2).sum(dim=(1, 2)).sqrt().clamp_min(1e-6)
+        return (-laplacian(u, grid) - f) / size[:, None, None, None]
+
+    def boundary(self, inputs: Tensor, grid: Tensor) -> tuple[Tensor, Tensor]:
+        """``h = x (1 - x) y (1 - y) NN`` via ``dirichlet_2d`` with zero edges."""
+        x, y = grid[0, :, 0], grid[1, 0, :]
+        batch = inputs.shape[0]
+        edge_x = inputs.new_zeros(batch, 1, x.shape[0])
+        edge_y = inputs.new_zeros(batch, 1, y.shape[0])
+        return dirichlet_2d(x, y, edge_x, edge_x, edge_y, edge_y)
+
+    def to_fno_input(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        coordinates = grid.expand(inputs.shape[0], -1, -1, -1)
+        return torch.cat([self.source(inputs, grid), coordinates], dim=1)

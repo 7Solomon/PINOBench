@@ -68,3 +68,41 @@ def dirichlet_1d_t(
     )
     phi = (tau[None, :] * xs * (1.0 - xs))[None, None]
     return g, phi
+
+
+def dirichlet_2d(
+    x: Tensor, y: Tensor, bottom: Tensor, top: Tensor, left: Tensor, right: Tensor
+) -> tuple[Tensor, Tensor]:
+    """Constraint for a stationary 2D problem on ``[0, 1]^2`` with Dirichlet values on all edges.
+
+    ``g`` is the transfinite (Coons) interpolation of the four edge functions,
+
+        g = (1 - x) L(y) + x R(y) + (1 - y) B(x) + y T(x)
+            - [(1 - x)(1 - y) B(0) + x (1 - y) B(1) + (1 - x) y T(0) + x y T(1)],
+
+    and ``phi = x (1 - x) y (1 - y)``. ``g`` reproduces every edge exactly if the edges agree
+    in the corners, e.g. ``L(0) == B(0)``.
+
+    Args:
+        x: Points ``(Nx,)`` from 0 to 1, along dimension ``-2`` of the field.
+        y: Points ``(Ny,)`` from 0 to 1, along dimension ``-1``.
+        bottom: ``B(x) = u(x, 0)``, shape ``(B, C, Nx)``.
+        top: ``T(x) = u(x, 1)``, shape ``(B, C, Nx)``.
+        left: ``L(y) = u(0, y)``, shape ``(B, C, Ny)``.
+        right: ``R(y) = u(1, y)``, shape ``(B, C, Ny)``.
+
+    Returns:
+        ``g`` of shape ``(B, C, Nx, Ny)`` and ``phi`` of shape ``(1, 1, Nx, Ny)``.
+    """
+    xs, ys = x[:, None], y[None, :]
+    bottom, top = bottom[..., :, None], top[..., :, None]
+    left, right = left[..., None, :], right[..., None, :]
+    corners = (
+        (1 - xs) * (1 - ys) * bottom[..., :1, :]
+        + xs * (1 - ys) * bottom[..., -1:, :]
+        + (1 - xs) * ys * top[..., :1, :]
+        + xs * ys * top[..., -1:, :]
+    )
+    g = (1 - xs) * left + xs * right + (1 - ys) * bottom + ys * top - corners
+    phi = (xs * (1 - xs) * ys * (1 - ys))[None, None]
+    return g, phi

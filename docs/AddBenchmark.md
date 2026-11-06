@@ -12,16 +12,17 @@
    | `sample_inputs(n, generator)` | operator inputs `(B, ...)` |
    | `analytical(inputs, grid)` | exact solution `(B, C, *resolution)` |
    | `residual(u, inputs, grid)` | normalized PDE residual on the interior points |
-   | `boundary(inputs, grid)` | `(g, φ)` for `u = g + φ·NN`; for stationary 1D problems use `numerics.constraints.dirichlet_1d` |
+   | `boundary(inputs, grid)` | `(g, φ)` for `u = g + φ·NN`; use `numerics.constraints.dirichlet_1d`, `dirichlet_1d_t` or `dirichlet_2d` |
    | `to_fno_input(inputs, grid)` | network input `(B, in_channels, *resolution)` including coordinates |
    | `data_scale(inputs, grid)` | optional: typical size of each output channel for the data loss |
    | `n_dims`, `in_channels`, `out_channels` | set the FNO dimension and the channels |
-   | `plot_type` | `"1d"` or `"1d_t"`; `"2d"` and `"2d_t"` are not yet in `visualization.SOLUTION_PLOTTERS` |
+   | `plot_type` | `"1d"`, `"1d_t"` or `"2d"`; `"2d_t"` is not yet in `visualization.SOLUTION_PLOTTERS` |
    | `variable_names`, `units`, `scales` | axis labels and conversion to physical units |
    | `main_variable` | optional, defaults to the first output variable |
 
 3. **Config** `configs/problem/<name>.yaml` with `name`, the parameters, the reference values,
-   `train_resolution`, `test_resolution` and `resolution_study`.
+   `train_resolution`, `test_resolution` and `resolution_study`. Optional: `loss_weights`
+   for the `hybrid` mode.
 4. **Tests** in `tests/`: PDE satisfied via autograd, boundaries exact, FD residual of the
    analytical solution small and convergent, shapes and hard constraint.
 5. Train with `python scripts/train.py problem=<name> training=physics`.

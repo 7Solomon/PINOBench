@@ -1,4 +1,4 @@
-"""Stationary flow in porous media: layered Darcy flow and Richards' equation (Gardner model)."""
+"""Stationary flow in porous media: layered Darcy flow, Richards' equation (Gardner model) and 2D Poisson flow."""
 
 from __future__ import annotations
 
@@ -44,3 +44,35 @@ def gardner_steady_head(alpha: Tensor, flux: Tensor, z: Tensor) -> Tensor:
     alpha, flux = alpha[:, None], flux[:, None]
     kirchhoff = -flux + (1.0 + flux) * torch.exp(-alpha * z)
     return torch.log(kirchhoff) / alpha
+
+
+def _sine_modes_2d(coefficients: Tensor, x: Tensor, y: Tensor, weight: Tensor) -> Tensor:
+    """``sum_mn w_mn a_mn sin(m pi x) sin(n pi y)`` for ``a`` of shape ``(B, M, M)``, values ``(B, *S)``."""
+    m = torch.arange(1, coefficients.shape[-1] + 1, dtype=coefficients.dtype, device=coefficients.device)
+    sin_x = torch.sin(x.unsqueeze(-1) * m * torch.pi)  # (*S, M)
+    sin_y = torch.sin(y.unsqueeze(-1) * m * torch.pi)
+    return torch.einsum("bmn,...m,...n->b...", coefficients * weight, sin_x, sin_y)
+
+
+def sine_source_2d(coefficients: Tensor, x: Tensor, y: Tensor) -> Tensor:
+    """Source ``f(x, y) = sum_{m,n=1..M} a_mn sin(m pi x) sin(n pi y)``.
+
+    Args:
+        coefficients: ``a_mn`` of shape ``(B, M, M)``.
+        x, y: Points of the same shape ``S``.
+
+    Returns:
+        Values of shape ``(B, *S)``.
+    """
+    return _sine_modes_2d(coefficients, x, y, torch.ones((), dtype=coefficients.dtype))
+
+
+def poisson_sine_head_2d(coefficients: Tensor, x: Tensor, y: Tensor) -> Tensor:
+    """Solution of ``-Laplace h = f`` on ``[0, 1]^2`` with ``h = 0`` on the boundary.
+
+    For the source of :func:`sine_source_2d` each mode is an eigenfunction of the Laplacian,
+    so ``h = sum a_mn / (pi^2 (m^2 + n^2)) sin(m pi x) sin(n pi y)``. Shapes as there.
+    """
+    m = torch.arange(1, coefficients.shape[-1] + 1, dtype=coefficients.dtype, device=coefficients.device)
+    weight = 1.0 / (torch.pi**2 * (m[:, None] ** 2 + m[None, :] ** 2))
+    return _sine_modes_2d(coefficients, x, y, weight)

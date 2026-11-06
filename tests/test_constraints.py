@@ -2,7 +2,7 @@
 
 import torch
 
-from pino.numerics.constraints import apply_hard_constraint, dirichlet_1d_t
+from pino.numerics.constraints import apply_hard_constraint, dirichlet_1d_t, dirichlet_2d
 
 
 def test_dirichlet_1d_t_reproduces_initial_and_boundary_values():
@@ -27,3 +27,27 @@ def test_dirichlet_1d_t_reproduces_initial_and_boundary_values():
     assert torch.all(phi[..., 0] == 0) and torch.all(phi[..., 0, :] == 0) and torch.all(phi[..., -1, :] == 0)
     assert torch.all(phi[..., 1:-1, 1:] > 0)
     torch.testing.assert_close(phi[0, 0, :, -1], x * (1 - x))
+
+
+def test_dirichlet_2d_reproduces_nontrivial_edges_exactly():
+    x = torch.linspace(0, 1, 13, dtype=torch.float64)
+    y = torch.linspace(0, 1, 9, dtype=torch.float64)
+
+    def exact(xs, ys):
+        # Smooth, non-polynomial boundary function, evaluated on the four edges.
+        return torch.stack([torch.exp(xs) * torch.cos(2 * ys) + xs * ys**2, torch.sin(3 * xs + ys)])[None]
+
+    bottom, top = exact(x, torch.zeros_like(x)), exact(x, torch.ones_like(x))
+    left, right = exact(torch.zeros_like(y), y), exact(torch.ones_like(y), y)
+    g, phi = dirichlet_2d(x, y, bottom, top, left, right)
+    assert g.shape == (1, 2, 13, 9) and phi.shape == (1, 1, 13, 9)
+
+    u = apply_hard_constraint(torch.randn(1, 2, 13, 9, dtype=torch.float64), g, phi)
+    for edge, value in ((u[..., :, 0], bottom), (u[..., :, -1], top), (u[..., 0, :], left), (u[..., -1, :], right)):
+        torch.testing.assert_close(edge, value, rtol=0, atol=1e-14)
+    assert torch.all(phi[..., 1:-1, 1:-1] > 0)
+    # A bilinear function is reproduced in the interior as well.
+    xs, ys = x[:, None], y[None, :]
+    bilinear = (1 + 2 * xs - 3 * ys + 4 * xs * ys)[None, None]
+    g, _ = dirichlet_2d(x, y, bilinear[..., :, 0], bilinear[..., :, -1], bilinear[..., 0, :], bilinear[..., -1, :])
+    torch.testing.assert_close(g, bilinear, rtol=0, atol=1e-14)

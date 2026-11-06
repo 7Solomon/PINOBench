@@ -111,3 +111,30 @@ def test_face_flux_of_linear_field():
     k_faces = torch.linspace(1, 2, 10, dtype=torch.float64)
     assert torch.allclose(face_flux(3 * x, k_faces, h), 3 * k_faces)
     assert torch.allclose(face_flux(3 * x, k_faces, h, gravity=1.0), 4 * k_faces)
+
+
+def test_laplacian_in_one_two_and_three_dimensions():
+    from pino.numerics.derivatives import laplacian
+
+    for n_dims, n in ((1, 41), (2, 33), (3, 17)):
+        # Build the coordinates in float64: fp32 rounding of x would be amplified by 1 / h^2.
+        axes = [torch.linspace(0.0, 1.0, n, dtype=torch.float64)] * n_dims
+        grid = torch.stack(torch.meshgrid(*axes, indexing="ij"))
+        # u = sum_d x_d^2 has Laplacian 2 n_dims, exact for central differences.
+        u = grid.pow(2).sum(0)[None, None]
+        result = laplacian(u, grid)
+        assert result.shape == (1, 1, *(n - 2,) * n_dims)
+        torch.testing.assert_close(result, torch.full_like(result, 2.0 * n_dims))
+
+
+def test_laplacian_converges_with_second_order_on_anisotropic_grids():
+    from pino.numerics.derivatives import interior, laplacian
+    from pino.numerics.grids import uniform_grid
+
+    errors = []
+    for n in (16, 32, 64):
+        grid = uniform_grid([(0.0, 1.0), (0.0, 2.0)], (n, 2 * n)).double()
+        u = (torch.sin(3 * grid[0]) * torch.cos(2 * grid[1]))[None, None]
+        exact = interior(-13 * u, [-2, -1])
+        errors.append((laplacian(u, grid) - exact).abs().max().item())
+    assert errors[0] / errors[1] > 3.5 and errors[1] / errors[2] > 3.5
