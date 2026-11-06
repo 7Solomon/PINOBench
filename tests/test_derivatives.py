@@ -5,7 +5,7 @@ import math
 import pytest
 import torch
 
-from pino.numerics.derivatives import central_d1, central_d2, conservative_divergence, interior
+from pino.numerics.derivatives import central_d1, central_d2, conservative_divergence, face_flux, interior
 from pino.numerics.grids import as_resolution, grid_spacing, uniform_grid
 
 
@@ -104,3 +104,10 @@ def test_conservative_divergence_gravity_term():
     k_faces = torch.rand(32, dtype=torch.float64) + 0.5
     assert conservative_divergence(-z, k_faces, h, gravity=1.0).abs().max() < 1e-12
     assert conservative_divergence(-z, k_faces, h).abs().max() > 0.1
+
+
+def test_face_flux_of_linear_field():
+    x, h = _grid(11)
+    k_faces = torch.linspace(1, 2, 10, dtype=torch.float64)
+    assert torch.allclose(face_flux(3 * x, k_faces, h), 3 * k_faces)
+    assert torch.allclose(face_flux(3 * x, k_faces, h, gravity=1.0), 4 * k_faces)

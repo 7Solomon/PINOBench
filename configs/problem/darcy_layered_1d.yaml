@@ -1,0 +1,17 @@
+# Two-layer Darcy flow: -(k(x) h')' = 0 on x in [0, 1], h(0) = 1, h(1) = 0
+# k = k1 for x < x_s and k2 for x >= x_s, k1 and k2 log-uniform.
+name: darcy_layered_1d
+k_low: 0.1           # k / k_ref
+k_high: 10.0
+interface_low: 0.3   # x_s
+interface_high: 0.7
+
+# Reference values: x = x_hat L, h = h_hat * head_drop, k = k_hat k_ref (k_ref = 1e-5 m/s).
+# The head is linear in h_hat, so k_ref does not enter the solution.
+length: 10.0         # m
+head_drop: 1.0       # m
+k_ref: 1.0e-5        # m/s
+
+train_resolution: 64
+test_resolution: 64
+resolution_study: [32, 64, 128, 256]
