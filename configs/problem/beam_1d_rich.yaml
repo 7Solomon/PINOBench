@@ -1,0 +1,16 @@
+# beam_1d with the rich input family: sine-series load q(x) = sum_{n=1..N} q_n sin(n pi x),
+# q_n ~ U(coeff_low, coeff_high) / n^coeff_decay, EI as in beam_1d.
+# Exact solution: M = sum q_n sin(n pi x) / (n pi)^2, w = sum q_n sin(n pi x) / (EI (n pi)^4).
+# Usage: python scripts/train.py problem=beam_1d_rich problem.output_param=unscaled
+defaults:
+  - beam_1d
+  - _self_
+
+inputs: rich
+n_series: 8
+coeff_low: -1.0
+coeff_high: 1.0
+coeff_decay: 1.0
+
+# RMS of w and M over 200 000 samples of this family on 64 points (0.00418 and 0.0414), rounded.
+output_scale_global: [0.004, 0.04]

@@ -28,6 +28,7 @@ python scripts/train.py problem=darcy_layered_1d training=hybrid   # uses loss_w
 python scripts/train.py problem=richards_steady_1d training=physics training.epochs=1000 seed=1
 
 # variants (defaults: inputs simple, output_param constrained)
+python scripts/train.py problem=beam_1d_rich training=physics problem.output_param=unscaled
 python scripts/train.py problem=beam_1d training=data problem.output_param=direct seed=1
 
 # re-evaluate and re-plot a finished run (refuses runs with a different wrapper)
@@ -114,6 +115,14 @@ output over a large sample of the input family, rounded. Loss normalizations (`d
 scaling) may still depend on the inputs per sample; they act on the loss, not on the output.
 `direct` is refused in `physics` and `hybrid`: without the hard constraint and without a
 boundary loss the PDE does not determine the solution.
+
+Variant configs inherit from the base YAML through Hydra `defaults`, e.g.
+`configs/problem/beam_1d_rich.yaml`. `output_param` is set as an override. Only `beam_1d`
+implements `inputs: rich`; every other problem refuses it.
+
+| Benchmark | `inputs: rich` | Exact solution | Normalization (loss only) |
+|---|---|---|---|
+| `beam_1d` | q = Σ_{n=1}^{8} qₙ sin(nπx), qₙ ~ U(−1, 1)/n; EI ~ U(0.5, 2) | M = Σ qₙ sin(nπx)/(nπ)², w = Σ qₙ sin(nπx)/(EI (nπ)⁴) | q_rms = √(Σqₙ²/2); equilibrium / q_rms, curvature / (M_c/EI) with M_c = q_rms/π²; `data_scale` = (q_rms/(π⁴EI), q_rms/π²), the amplitudes of a single first mode |
 
 Every problem class has a `WRAPPER_VERSION`, increased by hand whenever g, φ or the output
 scaling change. `metrics.json` and `history.json` store `wrapper_version`, `inputs` and
