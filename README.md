@@ -118,7 +118,8 @@ boundary loss the PDE does not determine the solution.
 
 Variant configs inherit from the base YAML through Hydra `defaults`, e.g.
 `configs/problem/beam_1d_rich.yaml`. `output_param` is set as an override. Only `beam_1d`
-implements `inputs: rich`; every other problem refuses it.
+implements `inputs: rich`; every other problem refuses it. The pilot of all variants on
+`beam_1d` is summarized in [docs/VariantPilot.md](docs/VariantPilot.md).
 
 | Benchmark | `inputs: rich` | Exact solution | Normalization (loss only) |
 |---|---|---|---|
