@@ -9,6 +9,7 @@ import torch
 from torch import Tensor
 
 from pino.analytical.diffusion import heat_sine_series, sine_series
+from pino.numerics.constraints import dirichlet_1d_t
 from pino.numerics.grids import as_resolution, grid_spacing, uniform_grid
 from pino.pdes.diffusion import diffusion_residual
 from pino.problems.base import Problem
@@ -63,14 +64,14 @@ class Heat1D(Problem):
         return diffusion_residual(u, dx, dt, self.a) / self.residual_scale
 
     def boundary(self, inputs: Tensor, grid: Tensor) -> tuple[Tensor, Tensor]:
-        """Return ``g = T0(x)`` and ``phi = t x (1 - x)``."""
-        x, t = grid[0], grid[1]
-        g = self._initial_profile(inputs, x)
+        """Return ``g = T0(x)`` and ``phi = tau x (1 - x)`` with ``tau = t / t_end``."""
+        x, t = grid[0, :, 0], grid[1, 0, :]
+        initial = self._initial_profile(inputs, x)
         # sin(n pi) is only zero up to rounding, the Dirichlet value itself is exactly zero.
-        g[..., 0, :] = 0.0
-        g[..., -1, :] = 0.0
-        phi = (t * x * (1.0 - x))[None, None]
-        return g, phi
+        initial[..., 0] = 0.0
+        initial[..., -1] = 0.0
+        zeros = initial.new_zeros(*initial.shape[:2], t.shape[0])
+        return dirichlet_1d_t(x, t, initial, zeros, zeros)
 
     def to_fno_input(self, inputs: Tensor, grid: Tensor) -> Tensor:
         x, t = grid[0], grid[1]
