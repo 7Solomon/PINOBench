@@ -12,6 +12,11 @@ inputs: sine                 # sine
 output_param: constrained    # constrained | unscaled | direct (data mode only)
 output_scale_global: null    # c per output channel for unscaled and direct; null = 1
 
+# Weight of the boundary penalty L_bc (output_param=soft only), from the soft pilot
+# (docs/SoftConstraintPilot.md): physics with bc = 1 beat 10 and 100 (26 % rel. L2).
+loss_weights:
+  bc: 1.0
+
 train_resolution: 64
 test_resolution: 64
 resolution_study: [32, 64, 128, 256]

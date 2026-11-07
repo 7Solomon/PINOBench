@@ -34,23 +34,33 @@ def test_overridden_keys_parses_hydra_overrides():
 
 def test_problem_loss_weights_replace_training_weights_in_hybrid_only():
     darcy = problem_cfg("darcy_layered_1d")
-    assert resolve_loss_weights(training_cfg("hybrid"), darcy) == {"physics": 1.0, "data": 300.0, "bc": 10.0}
+    assert resolve_loss_weights(training_cfg("hybrid"), darcy) == {"physics": 1.0, "data": 300.0, "bc": 100.0}
     # Single-term modes keep their fixed weights.
-    assert resolve_loss_weights(training_cfg("physics"), darcy) == {"physics": 1.0, "data": 0.0, "bc": 10.0}
-    assert resolve_loss_weights(training_cfg("data"), darcy) == {"physics": 0.0, "data": 1.0, "bc": 10.0}
+    assert resolve_loss_weights(training_cfg("physics"), darcy) == {"physics": 1.0, "data": 0.0, "bc": 100.0}
+    assert resolve_loss_weights(training_cfg("data"), darcy) == {"physics": 0.0, "data": 1.0, "bc": 100.0}
 
 
 def test_problems_without_loss_weights_keep_the_global_weights():
-    for name in ("heat_1d", "beam_1d", "richards_steady_1d"):
+    for name in ("richards_steady_1d", "chloride_1d", "darcy_poisson_2d"):
         assert "loss_weights" not in problem_cfg(name)
         assert resolve_loss_weights(training_cfg("hybrid"), problem_cfg(name)) == {"physics": 1.0, "data": 1.0, "bc": 10.0}
+
+
+def test_soft_pilot_bc_weights_act_in_every_mode():
+    """beam_1d and heat_1d set only bc; physics and data keep the training weights."""
+    for name, bc in (("beam_1d", 100.0), ("heat_1d", 1.0)):
+        for mode in ("physics", "data", "hybrid"):
+            training = training_cfg(mode)
+            expected = {**{k: float(v) for k, v in training.weights.items()}, "bc": bc}
+            assert resolve_loss_weights(training, problem_cfg(name)) == expected
 
 
 def test_command_line_override_wins_over_problem_loss_weights():
     training = training_cfg("hybrid")
     training.weights.data = 50.0  # as Hydra would apply training.weights.data=50
     weights = resolve_loss_weights(training, problem_cfg("darcy_layered_1d"), {"training.weights.data"})
-    assert weights == {"physics": 1.0, "data": 50.0, "bc": 10.0}
+    assert weights == {"physics": 1.0, "data": 50.0, "bc": 100.0}
+    # Overriding the whole block keeps every training weight, also bc.
     weights = resolve_loss_weights(training, problem_cfg("darcy_layered_1d"), {"training.weights"})
     assert weights == {"physics": 1.0, "data": 50.0, "bc": 10.0}
 

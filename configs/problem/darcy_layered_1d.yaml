@@ -24,6 +24,9 @@ resolution_study: [32, 64, 128, 256]
 # Hybrid mode only: replaces training.weights. The data loss is about 1e-7 against a physics
 # loss of about 1e-4, so with 1:1 the hybrid run is physics-dominated. A command-line
 # override of training.weights.<term> still wins.
+# bc: weight of the boundary penalty L_bc (output_param=soft only, every mode), from the
+# soft pilot (docs/SoftConstraintPilot.md): physics with bc = 100 beat 1 and 10.
 loss_weights:
   physics: 1.0
   data: 300.0
+  bc: 100.0

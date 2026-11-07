@@ -30,6 +30,7 @@ COLUMNS = {
     "rel_l2_min": "Min (Seeds)",
     "rel_l2_max": "Max (Seeds)",
     "per_variable": "Alle Variablen (Mittel)",
+    "bc_error_max": "Randfehler max",
     "training_time_s": "Zeit [s]",
     "n_parameters": "Parameter",
 }
@@ -62,6 +63,12 @@ def latest_per_seed(outputs: Path) -> dict[tuple[str, str, str], dict[int, dict]
     return groups
 
 
+def bc_error_max(runs: list[dict]) -> float | None:
+    """Largest ``bc_error_max`` of the main variable over the seeds; ``None`` for older runs."""
+    values = [run["bc_error_max"][run["main_variable"]] for run in runs if "bc_error_max" in run]
+    return max(values) if values else None
+
+
 def collect(outputs: Path) -> list[dict]:
     """Return one row per benchmark, variant and mode, aggregated over the seeds."""
     rows = []
@@ -83,6 +90,7 @@ def collect(outputs: Path) -> list[dict]:
                 "rel_l2_min": min(errors),
                 "rel_l2_max": max(errors),
                 "per_variable": per_variable,
+                "bc_error_max": bc_error_max(runs),
                 "training_time_s": mean(run["training_time_s"] for run in runs),
                 "n_parameters": runs[0]["n_parameters"],
             }
@@ -104,6 +112,7 @@ def format_row(row: dict) -> list[str]:
         f"{100 * row['rel_l2_min']:.2f} %",
         f"{100 * row['rel_l2_max']:.2f} %",
         ", ".join(f"{name} {100 * value:.2f} %" for name, value in row["per_variable"].items()),
+        "-" if row["bc_error_max"] is None else f"{100 * row['bc_error_max']:.2f} %",
         f"{row['training_time_s']:.0f}",
         f"{row['n_parameters']:,}".replace(",", " "),
     ]

@@ -39,6 +39,15 @@ def test_groups_by_variant_and_aggregates_over_seeds(tmp_path):
     assert original["training_time_s"] == 150.0 and original["per_variable"]["M"] == 0.03
     assert rows["sine/unscaled"]["n_seeds"] == 1
     assert original["label"] == "beam_1d" and rows["sine/unscaled"]["label"] == "beam_1d\nsine/unscaled"
+    assert original["bc_error_max"] is None
+
+
+def test_boundary_error_column_takes_the_worst_seed(tmp_path):
+    write(tmp_path, "a", seed=0, output_param="soft", bc_error_max={"w": 0.01, "M": 0.5})
+    write(tmp_path, "b", seed=1, output_param="soft", bc_error_max={"w": 0.03, "M": 0.5})
+    (row,) = summarize.collect(tmp_path)
+    assert row["bc_error_max"] == 0.03
+    assert summarize.format_row(row)[9] == "3.00 %"
 
 
 def test_default_variant_is_per_benchmark(tmp_path):
