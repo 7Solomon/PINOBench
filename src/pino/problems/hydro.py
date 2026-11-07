@@ -41,6 +41,7 @@ class DarcyLayered1D(_Stationary1D):
     """
 
     WRAPPER_VERSION = "1"
+    SUPPORTED_INPUTS = ("two_layer",)  # k1, k2, x_s
 
     in_channels = 2  # log10 k(x), x
     variable_names = {"coordinates": ["x"], "solution": ["h"]}
@@ -113,6 +114,7 @@ class RichardsSteady1D(_Stationary1D):
     """
 
     WRAPPER_VERSION = "1"
+    SUPPORTED_INPUTS = ("uniform",)  # alpha, q / Ks uniform
 
     in_channels = 3  # alpha, q / Ks, z
     variable_names = {"coordinates": ["z"], "solution": ["h"]}
@@ -170,6 +172,7 @@ class DarcyPoisson2D(Problem):
     """
 
     WRAPPER_VERSION = "1"
+    SUPPORTED_INPUTS = ("sine",)  # f = double sine series
 
     n_dims = 2
     in_channels = 3  # f, x, y

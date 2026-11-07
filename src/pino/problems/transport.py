@@ -32,6 +32,7 @@ class Chloride1D(Problem):
     """
 
     WRAPPER_VERSION = "1"
+    SUPPORTED_INPUTS = ("uniform",)  # Cs, D uniform
 
     n_dims = 2
     in_channels = 4  # Cs, D, x, tau

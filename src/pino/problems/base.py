@@ -17,8 +17,6 @@ import torch
 from torch import Tensor
 
 
-#: Input families. ``simple`` is the original one of every benchmark.
-INPUT_VARIANTS = ("simple", "rich")
 #: Output parametrizations, see :meth:`Problem.output_parametrization`.
 OUTPUT_PARAMS = ("constrained", "unscaled", "direct")
 
@@ -27,18 +25,19 @@ class Problem(ABC):
     """A benchmark with an analytical solution.
 
     Variants: ``inputs`` and ``output_param`` are read from the problem config by
-    :meth:`configure_variants` (defaults ``simple`` and ``constrained``, the original
-    behavior of every benchmark).
+    :meth:`configure_variants`. The defaults, the first entry of ``SUPPORTED_INPUTS`` and
+    ``constrained``, are the original behavior of every benchmark.
     """
 
     #: Version of ``boundary()`` and ``output_scale()``. Increase it by hand whenever g, phi
     #: or the output scaling change, so that old checkpoints are no longer evaluated with
     #: a different wrapper (``scripts/evaluate.py`` refuses them).
     WRAPPER_VERSION: str
-    #: Input variants a problem implements.
-    SUPPORTED_INPUTS: tuple[str, ...] = ("simple",)
+    #: Input families a problem implements, named after what is sampled (e.g. ``linear``,
+    #: ``sine``). The first one is the original family and the default.
+    SUPPORTED_INPUTS: tuple[str, ...]
 
-    inputs: str = "simple"
+    inputs: str
     output_param: str = "constrained"
     #: Global output constant ``c`` per channel for ``unscaled`` and ``direct``.
     output_scale_global: tuple[float, ...] | None = None
@@ -98,12 +97,15 @@ class Problem(ABC):
         """
         return None
 
+    @classmethod
+    def default_inputs(cls) -> str:
+        """The original input family of the benchmark."""
+        return cls.SUPPORTED_INPUTS[0]
+
     def configure_variants(self, cfg) -> None:
         """Read and validate ``inputs``, ``output_param`` and ``output_scale_global``."""
-        inputs = str(cfg.get("inputs", "simple"))
+        inputs = str(cfg.get("inputs") or self.default_inputs())
         output_param = str(cfg.get("output_param", "constrained"))
-        if inputs not in INPUT_VARIANTS:
-            raise ValueError(f"Unknown inputs variant '{inputs}'. Available: {INPUT_VARIANTS}")
         if inputs not in self.SUPPORTED_INPUTS:
             raise ValueError(
                 f"{self.name} does not implement inputs='{inputs}'. Supported: {self.SUPPORTED_INPUTS}"

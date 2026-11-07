@@ -3,7 +3,8 @@
 Rows are grouped by benchmark x ``inputs`` x ``output_param`` x mode and aggregated over the
 seeds: for every seed the most recent run is used, and the mean rel. L2 of each run (main
 variable) is reported as mean, minimum and maximum over the seeds. Runs without variant
-fields count as ``simple/constrained``. Runs below ``outputs/_superseded/`` are ignored.
+fields count as the benchmark's original input family (the first of ``SUPPORTED_INPUTS``)
+with ``constrained``. Runs below ``outputs/_superseded/`` are ignored.
 
 Usage: ``python scripts/summarize.py [--outputs outputs]``
 """
@@ -16,6 +17,7 @@ import json
 from pathlib import Path
 from statistics import mean
 
+from pino.problems import problem_class
 from pino.visualization import plot_summary
 
 COLUMNS = {
@@ -33,11 +35,17 @@ COLUMNS = {
 }
 SUPERSEDED = "_superseded"
 MODE_ORDER = {"physics": 0, "data": 1, "hybrid": 2}
-DEFAULT_VARIANT = "simple/constrained"
+DEFAULT_OUTPUT_PARAM = "constrained"
+
+
+def default_variant(benchmark: str) -> str:
+    """``<original input family>/constrained``, the original benchmark."""
+    return f"{problem_class(benchmark).default_inputs()}/{DEFAULT_OUTPUT_PARAM}"
 
 
 def variant(metrics: dict) -> str:
-    return f"{metrics.get('inputs', 'simple')}/{metrics.get('output_param', 'constrained')}"
+    inputs = metrics.get("inputs") or problem_class(metrics["benchmark"]).default_inputs()
+    return f"{inputs}/{metrics.get('output_param', DEFAULT_OUTPUT_PARAM)}"
 
 
 def latest_per_seed(outputs: Path) -> dict[tuple[str, str, str], dict[int, dict]]:
@@ -67,7 +75,7 @@ def collect(outputs: Path) -> list[dict]:
                 "benchmark": benchmark,
                 "variant": variant_name,
                 "mode": mode,
-                "label": benchmark if variant_name == DEFAULT_VARIANT else f"{benchmark}\n{variant_name}",
+                "label": benchmark if variant_name == default_variant(benchmark) else f"{benchmark}\n{variant_name}",
                 "variable": runs[0].get("main_variable", "-"),
                 "n_seeds": len(runs),
                 "seeds": sorted(seeds),
@@ -81,7 +89,7 @@ def collect(outputs: Path) -> list[dict]:
         )
     return sorted(
         rows,
-        key=lambda r: (r["benchmark"], r["variant"] != DEFAULT_VARIANT, r["variant"], MODE_ORDER.get(r["mode"], 99)),
+        key=lambda r: (r["benchmark"], r["variant"] != default_variant(r["benchmark"]), r["variant"], MODE_ORDER.get(r["mode"], 99)),
     )
 
 

@@ -27,13 +27,13 @@ python scripts/train.py problem=darcy_layered_1d training=hybrid   # uses loss_w
 # override single values
 python scripts/train.py problem=richards_steady_1d training=physics training.epochs=1000 seed=1
 
-# variants (defaults: inputs simple, output_param constrained)
-python scripts/train.py problem=beam_1d_rich training=physics problem.output_param=unscaled
+# variants (defaults: the benchmark's original input family, output_param constrained)
+python scripts/train.py problem=beam_1d_sine training=physics problem.output_param=unscaled
 python scripts/train.py problem=beam_1d training=data problem.output_param=direct seed=1
 
 # re-evaluate and re-plot a finished run (refuses runs with a different wrapper)
-python scripts/evaluate.py outputs/heat_1d/physics/<timestamp>
-python scripts/evaluate.py outputs/heat_1d/physics/<timestamp> --allow-legacy  # runs without wrapper_version
+python scripts/evaluate.py outputs/heat_1d/sine-constrained/physics/<timestamp>
+python scripts/evaluate.py <run_dir> --allow-legacy  # runs without wrapper_version
 
 # collect all runs under outputs/
 python scripts/summarize.py
@@ -100,7 +100,7 @@ original benchmarks.
 
 | Switch | Values | Default |
 |---|---|---|
-| `inputs` | `simple`, `rich` | `simple` |
+| `inputs` | input families of the benchmark, see the table below | the first one, the original family |
 | `output_param` | `constrained`, `unscaled`, `direct` | `constrained` |
 
 | `output_param` | Prediction | Modes |
@@ -117,13 +117,28 @@ scaling) may still depend on the inputs per sample; they act on the loss, not on
 boundary loss the PDE does not determine the solution.
 
 Variant configs inherit from the base YAML through Hydra `defaults`, e.g.
-`configs/problem/beam_1d_rich.yaml`. `output_param` is set as an override. Only `beam_1d`
-implements `inputs: rich`; every other problem refuses it. The pilot of all variants on
-`beam_1d` is summarized in [docs/VariantPilot.md](docs/VariantPilot.md).
+`configs/problem/beam_1d_sine.yaml`. `output_param` is set as an override. The pilot of all
+variants on `beam_1d` is summarized in [docs/VariantPilot.md](docs/VariantPilot.md).
 
-| Benchmark | `inputs: rich` | Exact solution | Normalization (loss only) |
-|---|---|---|---|
-| `beam_1d` | q = Σ_{n=1}^{8} qₙ sin(nπx), qₙ ~ U(−1, 1)/n; EI ~ U(0.5, 2) | M = Σ qₙ sin(nπx)/(nπ)², w = Σ qₙ sin(nπx)/(EI (nπ)⁴) | q_rms = √(Σqₙ²/2); equilibrium / q_rms, curvature / (M_c/EI) with M_c = q_rms/π²; `data_scale` = (q_rms/(π⁴EI), q_rms/π²), the amplitudes of a single first mode |
+`inputs` names what is sampled, so the same name can mean a different family in another
+benchmark. Each problem class lists its families in `SUPPORTED_INPUTS`, the first one is the
+default; every other value is refused. Only `beam_1d` has a second family so far.
+
+| Benchmark | `inputs` | Sampled operator input |
+|---|---|---|
+| `beam_1d` | **`linear`** | q = q₀ + q₁x, q₀, q₁ ~ U(0, 1); EI ~ U(0.5, 2) |
+| | `sine` | q = Σ_{n=1}^{8} qₙ sin(nπx), qₙ ~ U(−1, 1)/n; EI ~ U(0.5, 2) |
+| `heat_1d` | **`sine`** | T₀ = Σ_{n=1}^{5} bₙ sin(nπx), bₙ ~ U(−1, 1) |
+| `richards_steady_1d` | **`uniform`** | α ~ U(1, 5), q/Ks ~ U(−0.9, −0.1) |
+| `darcy_layered_1d` | **`two_layer`** | k₁, k₂ log-uniform in [0.1, 10], x_s ~ U(0.3, 0.7) |
+| `chloride_1d` | **`uniform`** | Cs ~ U(0.5, 1), D ~ U(0.2, 1) |
+| `darcy_poisson_2d` | **`sine`** | f = Σ_{m,n=1}^{4} a_mn sin(mπx) sin(nπy), a_mn ~ U(−1, 1) |
+
+Default in bold. `beam_1d` with `inputs: sine`:
+
+| Exact solution | Normalization (loss only) |
+|---|---|
+| M = Σ qₙ sin(nπx)/(nπ)², w = Σ qₙ sin(nπx)/(EI (nπ)⁴) | q_rms = √(Σqₙ²/2); equilibrium / q_rms, curvature / (M_c/EI) with M_c = q_rms/π²; `data_scale` = (q_rms/(π⁴EI), q_rms/π²), the amplitudes of a single first mode |
 
 Every problem class has a `WRAPPER_VERSION`, increased by hand whenever g, φ or the output
 scaling change. `metrics.json` and `history.json` store `wrapper_version`, `inputs` and

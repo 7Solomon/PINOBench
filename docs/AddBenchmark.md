@@ -17,14 +17,15 @@
    | `to_fno_input(inputs, grid)` | network input `(B, in_channels, *resolution)` including coordinates |
    | `output_scale(inputs, grid)` | optional: per-sample scale s of the output, `constrained` only |
    | `data_scale(inputs, grid)` | optional: typical size of each output channel for the data loss |
-   | `SUPPORTED_INPUTS` | input variants the class implements, default `("simple",)` |
+   | `SUPPORTED_INPUTS` | required: tuple of input family names, named after what is sampled (e.g. `("linear", "sine")`); the first one is the original family and the default |
    | `n_dims`, `in_channels`, `out_channels` | set the FNO dimension and the channels |
    | `plot_type` | `"1d"`, `"1d_t"` or `"2d"`; `"2d_t"` is not yet in `visualization.SOLUTION_PLOTTERS` |
    | `variable_names`, `units`, `scales` | axis labels and conversion to physical units |
    | `main_variable` | optional, defaults to the first output variable |
 
 3. **Config** `configs/problem/<name>.yaml` with `name`, the parameters, the reference values,
-   `train_resolution`, `test_resolution` and `resolution_study`, plus `inputs`,
+   `train_resolution`, `test_resolution` and `resolution_study`, plus `inputs` (the first entry
+   of `SUPPORTED_INPUTS`, it appears in the run directory),
    `output_param` and `output_scale_global` (see the README). Optional: `loss_weights` for
    the `hybrid` mode.
 4. **Tests** in `tests/`: PDE satisfied via autograd, boundaries exact, FD residual of the

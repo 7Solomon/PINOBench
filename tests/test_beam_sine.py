@@ -1,4 +1,4 @@
-"""beam_1d with inputs = rich: sine-series load, closed-form solution, residual and configs."""
+"""beam_1d with inputs = sine: sine-series load, closed-form solution, residual and configs."""
 
 import math
 from pathlib import Path
@@ -24,7 +24,7 @@ def compose_config(*overrides: str):
 
 @pytest.fixture(scope="module")
 def cfg():
-    return compose_config("problem=beam_1d_rich").problem
+    return compose_config("problem=beam_1d_sine").problem
 
 
 @pytest.fixture(scope="module")
@@ -37,19 +37,19 @@ def inputs(problem):
     return problem.sample_inputs(6, torch.Generator().manual_seed(0)).double()
 
 
-def test_rich_config_inherits_from_beam_1d(cfg):
+def test_sine_config_inherits_from_beam_1d(cfg):
     base = OmegaConf.load(CONFIGS / "problem" / "beam_1d.yaml")
-    assert cfg.name == "beam_1d" and cfg.inputs == "rich" and cfg.output_param == "constrained"
+    assert cfg.name == "beam_1d" and cfg.inputs == "sine" and cfg.output_param == "constrained"
     assert cfg.stiffness_low == base.stiffness_low and cfg.length == base.length
     assert list(cfg.output_scale_global) == [0.004, 0.04]
 
 
 def test_run_directory_contains_the_variant():
-    hydra_cfg = compose_config("problem=beam_1d_rich", "problem.output_param=unscaled", "training=physics")
+    hydra_cfg = compose_config("problem=beam_1d_sine", "problem.output_param=unscaled", "training=physics")
     run_dir = hydra_cfg.hydra.run.dir
-    assert run_dir.startswith("outputs/beam_1d/rich-unscaled/physics/")
+    assert run_dir.startswith("outputs/beam_1d/sine-unscaled/physics/")
     default = compose_config().hydra.run.dir
-    assert default.startswith("outputs/heat_1d/simple-constrained/physics/")
+    assert default.startswith("outputs/heat_1d/sine-constrained/physics/")
 
 
 def test_sampler_follows_the_configured_family(problem, cfg):
@@ -103,7 +103,7 @@ def test_fd_residual_is_small_and_converges(problem, inputs):
 def test_constrained_scaling_and_network_channels(problem, inputs):
     grid = problem.grid(16)
     x = problem.to_fno_input(inputs.float(), grid)
-    assert x.shape == (6, 3, 16)  # q(x), EI, x as for simple
+    assert x.shape == (6, 3, 16)  # q(x), EI, x as for linear
     n = torch.arange(1, inputs.shape[1], dtype=torch.float64)
     load = (inputs[:, :-1, None] * torch.sin(n[:, None] * math.pi * grid[0].double())).sum(1)
     torch.testing.assert_close(x[:, 0].double(), load, rtol=1e-5, atol=1e-6)
@@ -116,8 +116,8 @@ def test_constrained_scaling_and_network_channels(problem, inputs):
     assert torch.all(u[..., 0] == 0) and torch.all(u[..., -1] == 0)
 
 
-def test_simple_beam_is_unchanged_by_the_rich_code_path():
-    simple = build_problem(OmegaConf.load(CONFIGS / "problem" / "beam_1d.yaml"))
-    assert simple.inputs == "simple"
-    inputs = simple.sample_inputs(4, torch.Generator().manual_seed(0))
+def test_linear_beam_is_unchanged_by_the_sine_code_path():
+    linear = build_problem(OmegaConf.load(CONFIGS / "problem" / "beam_1d.yaml"))
+    assert linear.inputs == "linear"
+    inputs = linear.sample_inputs(4, torch.Generator().manual_seed(0))
     assert inputs.shape == (4, 3)

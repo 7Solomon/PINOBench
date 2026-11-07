@@ -13,7 +13,7 @@ from omegaconf import OmegaConf
 from pino.evaluation import IncompatibleRunError, check_run_compatibility, predict
 from pino.models.factory import build_model
 from pino.numerics.constraints import dirichlet_1d
-from pino.problems import available_problems, build_problem
+from pino.problems import available_problems, build_problem, problem_class
 from pino.trainer import train
 
 ROOT = Path(__file__).parents[1]
@@ -28,16 +28,49 @@ def problem_cfg(name: str, **overrides):
     return cfg
 
 
+EXPECTED_INPUTS = {
+    "beam_1d": ("linear", "sine"),
+    "chloride_1d": ("uniform",),
+    "darcy_layered_1d": ("two_layer",),
+    "darcy_poisson_2d": ("sine",),
+    "heat_1d": ("sine",),
+    "richards_steady_1d": ("uniform",),
+}
+
+
+def test_every_problem_names_its_input_families():
+    assert set(available_problems()) == set(EXPECTED_INPUTS)
+    for name, families in EXPECTED_INPUTS.items():
+        assert problem_class(name).SUPPORTED_INPUTS == families
+
+
 @pytest.mark.parametrize("name", available_problems())
-def test_defaults_are_simple_and_constrained(name):
+def test_defaults_are_the_original_family_and_constrained(name):
+    default = problem_class(name).default_inputs()
+    assert default == EXPECTED_INPUTS[name][0]
+    # The YAML names the default family explicitly; it also appears in the run directory.
+    assert problem_cfg(name).inputs == default
     problem = build_problem(problem_cfg(name))
-    assert (problem.inputs, problem.output_param) == ("simple", "constrained")
+    assert (problem.inputs, problem.output_param) == (default, "constrained")
     assert isinstance(problem.WRAPPER_VERSION, str)
     assert problem.variant_metadata() == {
         "wrapper_version": problem.WRAPPER_VERSION,
-        "inputs": "simple",
+        "inputs": default,
         "output_param": "constrained",
     }
+
+
+def test_missing_inputs_key_falls_back_to_the_original_family():
+    cfg = problem_cfg("beam_1d")
+    del cfg["inputs"]
+    assert build_problem(cfg).inputs == "linear"
+
+
+def test_problem_without_supported_inputs_is_rejected():
+    from pino.problems.registry import register_problem
+
+    with pytest.raises(TypeError, match="SUPPORTED_INPUTS"):
+        register_problem("no_inputs")(type("NoInputs", (), {"WRAPPER_VERSION": "1"}))
 
 
 @pytest.mark.parametrize("name", available_problems())
@@ -124,10 +157,13 @@ def test_direct_is_rejected_outside_data_mode(mode, tmp_path):
 def test_invalid_and_unsupported_variants_are_rejected():
     with pytest.raises(ValueError, match="Unknown output_param"):
         build_problem(problem_cfg("beam_1d", output_param="free"))
-    with pytest.raises(ValueError, match="Unknown inputs"):
+    with pytest.raises(ValueError, match="beam_1d does not implement inputs='fancy'"):
         build_problem(problem_cfg("beam_1d", inputs="fancy"))
-    with pytest.raises(ValueError, match="does not implement inputs='rich'"):
-        build_problem(problem_cfg("heat_1d", inputs="rich"))
+    with pytest.raises(ValueError, match="heat_1d does not implement inputs='linear'"):
+        build_problem(problem_cfg("heat_1d", inputs="linear"))
+    # The old generic names are gone.
+    with pytest.raises(ValueError, match="does not implement inputs='simple'"):
+        build_problem(problem_cfg("beam_1d", inputs="simple"))
     with pytest.raises(ValueError, match="needs 2 entries"):
         build_problem(problem_cfg("beam_1d", output_scale_global=[1.0]))
 

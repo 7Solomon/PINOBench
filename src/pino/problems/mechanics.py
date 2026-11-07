@@ -27,8 +27,9 @@ class Beam1D(Problem):
 
     Characteristic sizes per sample, from the uniform load with the same mean
     ``q_mean = q0 + q1 / 2``: ``M_c = q_mean / 8`` and ``w_c = 5 q_mean / (384 EI)``.
-    ``inputs = rich`` replaces the linear load by a sine series ``q = sum_{n=1..N} q_n sin(n pi x)``
-    with ``q_n ~ U(coeff_low, coeff_high) / n^coeff_decay``. Operator inputs are then
+    These sizes belong to ``inputs = linear``, the default. ``inputs = sine`` replaces the linear
+    load by a sine series ``q = sum_{n=1..N} q_n sin(n pi x)`` with
+    ``q_n ~ U(coeff_low, coeff_high) / n^coeff_decay``. Operator inputs are then
     ``(q_1, ..., q_N, EI)`` with shape ``(B, N + 1)``. The network channels stay ``q(x), EI, x``.
     The characteristic sizes use the load RMS ``q_rms = sqrt(sum q_n^2 / 2)`` instead:
     ``M_c = q_rms / pi^2`` and ``w_c = q_rms / (pi^4 EI)``, the amplitudes of a single first mode.
@@ -39,7 +40,7 @@ class Beam1D(Problem):
     """
 
     WRAPPER_VERSION = "1"
-    SUPPORTED_INPUTS = ("simple", "rich")
+    SUPPORTED_INPUTS = ("linear", "sine")
 
     n_dims = 1
     in_channels = 3  # q(x), EI, x
@@ -52,7 +53,7 @@ class Beam1D(Problem):
         self.q0_range = (float(cfg.q0_low), float(cfg.q0_high))
         self.q1_range = (float(cfg.q1_low), float(cfg.q1_high))
         self.stiffness_range = (float(cfg.stiffness_low), float(cfg.stiffness_high))
-        # Sine-series load of inputs = rich.
+        # Sine-series load of inputs = sine.
         self.n_series = int(cfg.get("n_series", 8))
         self.coeff_range = (float(cfg.get("coeff_low", -1.0)), float(cfg.get("coeff_high", 1.0)))
         self.coeff_decay = float(cfg.get("coeff_decay", 1.0))
@@ -67,7 +68,7 @@ class Beam1D(Problem):
         return uniform_grid([(0.0, 1.0)], as_resolution(resolution, self.n_dims))
 
     def sample_inputs(self, n: int, generator: torch.Generator) -> Tensor:
-        if self.inputs == "rich":
+        if self.inputs == "sine":
             low, high = self.coeff_range
             decay = torch.arange(1, self.n_series + 1, dtype=torch.get_default_dtype()) ** self.coeff_decay
             coefficients = (low + (high - low) * torch.rand(n, self.n_series, generator=generator)) / decay
@@ -79,7 +80,7 @@ class Beam1D(Problem):
         return ranges[:, 0] + (ranges[:, 1] - ranges[:, 0]) * unit
 
     def analytical(self, inputs: Tensor, grid: Tensor) -> Tensor:
-        if self.inputs == "rich":
+        if self.inputs == "sine":
             w, m = simply_supported_beam_sine(inputs[:, :-1], inputs[:, -1], grid[0])
         else:
             w, m = simply_supported_beam(inputs[:, 0], inputs[:, 1], inputs[:, 2], grid[0])
@@ -90,7 +91,7 @@ class Beam1D(Problem):
 
         Each equation is divided by the size of its source term, so both residuals are
         relative quantities of order one for a wrong solution. ``q_ref`` is ``q_mean`` for
-        ``simple`` and ``q_rms`` for ``rich``; ``M_c`` as in the class docstring. These are
+        ``linear`` and ``q_rms`` for ``sine``; ``M_c`` as in the class docstring. These are
         per-sample loss normalizations only.
         """
         x, dx = grid[0], grid_spacing(grid, 0)
@@ -119,8 +120,8 @@ class Beam1D(Problem):
         return self.characteristic_sizes(inputs)
 
     def characteristic_sizes(self, inputs: Tensor) -> Tensor:
-        """``[w_c, M_c]``, shape ``(B, 2, 1)``: ``simple`` from ``q_mean``, ``rich`` from ``q_rms``."""
-        if self.inputs == "rich":
+        """``[w_c, M_c]``, shape ``(B, 2, 1)``: ``linear`` from ``q_mean``, ``sine`` from ``q_rms``."""
+        if self.inputs == "sine":
             q_rms = self._load_rms(inputs)
             return torch.stack([q_rms / (math.pi**4 * inputs[:, -1]), q_rms / math.pi**2], dim=1)[..., None]
         q_mean = self._mean_load(inputs)
@@ -135,13 +136,13 @@ class Beam1D(Problem):
         return torch.stack([load, stiffness, x.expand(batch, -1)], dim=1)
 
     def _load(self, inputs: Tensor, x: Tensor) -> Tensor:
-        if self.inputs == "rich":
+        if self.inputs == "sine":
             return sine_series(inputs[:, :-1], x)
         return inputs[:, 0, None] + inputs[:, 1, None] * x
 
     def _residual_scales(self, inputs: Tensor) -> tuple[Tensor, Tensor]:
         """``(M_c, q_ref)`` per sample, shape ``(B, 1)`` each."""
-        if self.inputs == "rich":
+        if self.inputs == "sine":
             q_rms = self._load_rms(inputs)[:, None]
             return q_rms / math.pi**2, q_rms
         q_mean = self._mean_load(inputs)[:, None]

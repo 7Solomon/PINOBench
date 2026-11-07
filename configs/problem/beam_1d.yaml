@@ -15,7 +15,7 @@ load_ref: 10.0       # kN/m
 stiffness_ref: 1.0e4 # kNm^2
 
 # Variants (see README). Defaults reproduce the original benchmark.
-inputs: simple               # simple | rich
+inputs: linear               # linear | sine (configs/problem/beam_1d_sine.yaml)
 output_param: constrained    # constrained | unscaled | direct (data mode only)
 # Global output constants c for unscaled and direct: RMS of w and M over 200 000 samples of
 # this input family on 64 points (0.0075 and 0.0741), rounded.

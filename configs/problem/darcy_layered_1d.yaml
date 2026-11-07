@@ -13,7 +13,7 @@ head_drop: 1.0       # m
 k_ref: 1.0e-5        # m/s
 
 # Variants (see README). Defaults reproduce the original benchmark.
-inputs: simple               # simple | rich
+inputs: two_layer            # two_layer
 output_param: constrained    # constrained | unscaled | direct (data mode only)
 output_scale_global: null    # c per output channel for unscaled and direct; null = 1
 

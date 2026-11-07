@@ -8,7 +8,7 @@ coeff_low: -1.0
 coeff_high: 1.0
 
 # Variants (see README). Defaults reproduce the original benchmark.
-inputs: simple               # simple | rich
+inputs: sine                 # sine
 output_param: constrained    # constrained | unscaled | direct (data mode only)
 output_scale_global: null    # c per output channel for unscaled and direct; null = 1
 

@@ -8,9 +8,9 @@ import importlib
 import pkgutil
 
 from pino.problems.base import Problem
-from pino.problems.registry import available_problems, build_problem, register_problem
+from pino.problems.registry import available_problems, build_problem, problem_class, register_problem
 
 for _module in pkgutil.iter_modules(__path__):
     importlib.import_module(f"{__name__}.{_module.name}")
 
-__all__ = ["Problem", "available_problems", "build_problem", "register_problem"]
+__all__ = ["Problem", "available_problems", "build_problem", "problem_class", "register_problem"]
