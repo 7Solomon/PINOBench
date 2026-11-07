@@ -97,3 +97,24 @@ def heat_sine_series_2d(coefficients: Tensor, x: Tensor, y: Tensor, t: Tensor, d
     # (B, M, N) contracted with (*S, M, N) -> (B, *S).
     return torch.tensordot(coefficients, modes, dims=([-2, -1], [-2, -1]))
 
+
+def chloride_corner(surface: Tensor, diffusivity: Tensor, x: Tensor, y: Tensor, t: Tensor) -> Tensor:
+    """Evaluate ``C = Cs [1 - erf(x / (2 sqrt(D t))) erf(y / (2 sqrt(D t)))]``.
+
+    Chloride ingress into the corner ``x, y >= 0`` with the exposed faces ``x = 0`` and ``y = 0``
+    (``C = Cs`` there) and ``C = 0`` initially. ``1 - C / Cs`` is the product of two solutions
+    ``erf(x / (2 sqrt(D t)))`` of the 1D diffusion equation, hence solves the 2D equation.
+
+    Args:
+        surface: Surface concentration ``Cs`` of shape ``(B,)``.
+        diffusivity: Diffusion coefficient ``D`` of shape ``(B,)``.
+        x, y, t: Evaluation points, broadcastable against each other, ``t > 0``.
+
+    Returns:
+        Values of shape ``(B, *S)`` with ``S`` the broadcast shape of ``x``, ``y`` and ``t``.
+    """
+    x, y, t = torch.broadcast_tensors(x, y, t)
+    extra = (1,) * x.dim()
+    surface = surface.reshape(-1, *extra)
+    width = 2.0 * torch.sqrt(diffusivity.reshape(-1, *extra) * t)
+    return surface * (1.0 - torch.erf(x / width) * torch.erf(y / width))

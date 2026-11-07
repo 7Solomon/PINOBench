@@ -31,6 +31,7 @@ def problem_cfg(name: str, **overrides):
 EXPECTED_INPUTS = {
     "beam_1d": ("linear", "sine"),
     "chloride_1d": ("uniform",),
+    "chloride_corner_2d": ("uniform",),
     "darcy_layered_1d": ("two_layer",),
     "darcy_poisson_2d": ("sine",),
     "heat_1d": ("sine",),

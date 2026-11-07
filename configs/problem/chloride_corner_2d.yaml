@@ -1,0 +1,39 @@
+# Chloride ingress into a corner: dC/dt = D (d2C/dx2 + d2C/dy2) on [0, 1]^2, t in [t_start, t_end]
+# Exposed faces x = 0 and y = 0 (C = Cs), C0 = 0:  C = Cs [1 - erf(x / (2 sqrt(D t))) erf(y / (2 sqrt(D t)))]
+# x = 1, y = 1 and C(x, y, t_start) from the analytical solution.
+name: chloride_corner_2d
+surface_low: 0.5      # Cs in M.-%/binder
+surface_high: 1.0
+diffusivity_low: 0.4  # D / D_ref
+diffusivity_high: 1.0
+t_start: 0.02         # t D_ref / L^2
+t_end: 0.05
+
+# Reference values as in chloride_1d: x = x_hat L, D = D_hat D_ref, t = t_hat L^2 / D_ref.
+# L^2 / D_ref = 0.04 m^2 / 1e-12 m^2/s = 4e10 s = 1267.5 a, so t in [25.3, 63.4] a.
+length_mm: 200.0
+diffusivity_ref: 1.0e-12  # m^2/s
+
+# Variants (see README). Defaults reproduce the original benchmark.
+inputs: uniform              # uniform
+output_param: constrained    # constrained | unscaled | direct (data mode only) | soft
+# Global output constant c for unscaled, direct and soft: RMS of C over 20 000 samples of
+# this input family on 64^3 points (0.354), rounded.
+output_scale_global: [0.35]
+
+# Grid (x, y, t), time last. Chosen from the memory and runtime test (README, "3D FNO"):
+# 32^3 with batch 8 takes ~56 ms per step on an A100, so 1000 examples x 200 epochs ~ 25 min.
+train_resolution: [32, 32, 32]
+test_resolution: [32, 32, 32]
+# Space and time scaled together.
+resolution_study: [[24, 24, 24], [32, 32, 32], [48, 48, 48], [64, 64, 64]]
+
+# Replaces the training config for these keys unless set on the command line (budget ~30 min).
+training:
+  epochs: 200
+  batch_size: 8
+
+# Weight of the boundary penalty L_bc (output_param=soft only): heat_1d's best weight from the
+# soft pilot (docs/SoftConstraintPilot.md), the most similar benchmark.
+loss_weights:
+  bc: 1.0

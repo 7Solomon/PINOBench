@@ -227,6 +227,7 @@ only used to show the plots in physical units.
 | `chloride_1d` | ∂C/∂t = D ∂²C/∂x², x ∈ [0, 1], t ∈ [0.01, 0.05]; C(0, t) = Cs, C(1, t) and C(x, t₀) analytical | Cs ~ U(0.5, 1), D ~ U(0.2, 1) | C = Cs erfc(x / (2√(Dt))) (Crank, C₀ = 0) | C |
 | `darcy_poisson_2d` | −Δh = f on [0, 1]², h = 0 on the boundary, k = 1 | f = Σ_{m,n=1}^{4} a_mn sin(mπx) sin(nπy), a_mn ~ U(−1, 1) | h = Σ a_mn / (π²(m² + n²)) sin(mπx) sin(nπy) | h |
 | `heat_2d` | ∂T/∂t = a ΔT on [0, 1]², t ∈ [0, 0.05], a = 1, T = 0 on the boundary | T₀ = Σ_{m,n=1}^{3} b_mn sin(mπx) sin(nπy), b_mn ~ U(−1, 1) | T = Σ b_mn sin(mπx) sin(nπy) exp(−aπ²(m² + n²)t) | T |
+| `chloride_corner_2d` | ∂C/∂t = D ΔC on [0, 1]², t ∈ [0.02, 0.05]; C = Cs on x = 0 and y = 0, x = 1, y = 1 and C(x, y, t₀) analytical | Cs ~ U(0.5, 1), D ~ U(0.4, 1) | C = Cs [1 − erf(x/(2√(Dt))) · erf(y/(2√(Dt)))] (product of two 1D solutions, C₀ = 0) | C |
 
 | Benchmark | FNO | Hard constraint | Residual normalization | Reference values |
 |---|---|---|---|---|
@@ -237,6 +238,7 @@ only used to show the plots in physical units.
 | `chloride_1d` | 2D over (x, t), input Cs, D, x, τ | `dirichlet_1d_t` with C(x, t₀), Cs and C(1, t); φ = τ·x(1−x), τ = (t − t₀)/(t_end − t₀) | per sample divided by Cs/t₀: ∂C/∂t peaks at ≈ 0.24 Cs/t for every D | L = 200 mm, D_ref = 10⁻¹² m²/s, t_ref = L²/D_ref = 4·10¹⁰ s ≈ 1268 a, so t ∈ [12.7, 63.4] a; C in M.-%/binder |
 | `darcy_poisson_2d` | 2D over (x, y), input f, x, y | `dirichlet_2d` (Coons patch, here g = 0), φ = x(1−x)y(1−y) | per sample divided by the RMS of f, √(Σa²)/2 | L = 10 m, H = 1 m; f = source / k in 1/m, normalized f̂ = f L²/H, so f = 0.01 f̂ 1/m |
 | `heat_2d` | 3D over (x, y, t), input T₀, x, y, t/t_end | `dirichlet_2d_t` with u₀ = T₀ and zero edges: T = T₀ + τ·x(1−x)y(1−y)·NN | divided by aπ²·2M² = 178, the fastest decay rate (as heat_1d) | L and ΔT in the YAML (1 m, 1 K); time non-dimensional, t̂ = a t/L² |
+| `chloride_corner_2d` | 3D over (x, y, t), input Cs, D, x, y, τ | `dirichlet_2d_t` with C(x, y, t₀), Cs on x = 0 and y = 0, analytical values on x = 1 and y = 1 | per sample divided by Cs/t₀ (as chloride_1d) | as chloride_1d: L = 200 mm, D_ref = 10⁻¹² m²/s, t_ref ≈ 1268 a, so t ∈ [25.3, 63.4] a; C in M.-%/binder |
 
 The normalizations are explained in the docstrings of the problem classes.
 
@@ -254,7 +256,7 @@ The normalizations are explained in the docstrings of the problem classes.
 
 ### Planned
 
-`chloride_corner_2d` (2D + t with a 3D FNO) and `plane_stress_bending_2d`: a
+`plane_stress_bending_2d`: a
 **plane-stress disk** (Navier–Lamé equations for the displacements u and v) under pure bending.
 It is not a plate; there is no plate-bending benchmark.
 
