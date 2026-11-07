@@ -10,7 +10,7 @@ from torch import Tensor
 
 from pino.analytical.diffusion import heat_sine_series, sine_series
 from pino.numerics.constraints import dirichlet_1d_t
-from pino.numerics.grids import as_resolution, grid_spacing, uniform_grid
+from pino.numerics.grids import as_resolution, uniform_grid
 from pino.pdes.diffusion import diffusion_residual
 from pino.problems.base import Problem
 from pino.problems.registry import register_problem
@@ -64,8 +64,7 @@ class Heat1D(Problem):
         mode's residual at the order of its amplitude, independent of ``a`` and ``N``, and
         makes the residual directly comparable with the size of ``T``.
         """
-        dx, dt = grid_spacing(grid, 0), grid_spacing(grid, 1)
-        return diffusion_residual(u, dx, dt, self.a) / self.residual_scale
+        return diffusion_residual(u, grid, self.a) / self.residual_scale
 
     def boundary(self, inputs: Tensor, grid: Tensor) -> tuple[Tensor, Tensor]:
         """Return ``g = T0(x)`` and ``phi = tau x (1 - x)`` with ``tau = t / t_end``."""

@@ -12,6 +12,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 
 from pino.evaluation import evaluate_model, write_metrics
 from pino.losses import overridden_keys, resolve_loss_weights
+from pino.numerics.grids import resolution_key
 from pino.models.factory import build_model, count_parameters
 from pino.problems import build_problem
 from pino.trainer import select_device, set_seed, train
@@ -58,7 +59,7 @@ def main(cfg: DictConfig) -> None:
         datetime.now().isoformat(timespec="seconds"),
         history,
     )
-    plot_run(problem, result, history, cfg.training.mode, int(cfg.problem.train_resolution), run_dir)
+    plot_run(problem, result, history, cfg.training.mode, resolution_key(cfg.problem.train_resolution), run_dir)
     log.info("rel. L2 %s, time %.0f s, results in %s", metrics["rel_l2"], outcome.training_time_s, run_dir)
 
 

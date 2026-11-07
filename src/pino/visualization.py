@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 from pino.evaluation import EvaluationResult  # noqa: E402
+from pino.numerics.grids import resolution_size  # noqa: E402
 from pino.problems.base import Problem  # noqa: E402
 
 # Fixed categorical order, validated for color-vision deficiencies.
@@ -134,16 +135,26 @@ def plot_error_histogram(errors: np.ndarray, title: str, path: Path) -> None:
     _save(fig, path)
 
 
-def plot_resolution(resolution_errors: dict[int, dict[str, float]], train_resolution: int, title: str, path: Path):
-    """Mean test error against the test resolution, with the training resolution marked."""
-    resolutions = sorted(resolution_errors)
-    errors = [resolution_errors[r]["mean"] for r in resolutions]
+def plot_resolution(
+    resolution_errors: dict[int | str, dict[str, float]], train_resolution: int | str, title: str, path: Path
+):
+    """Mean test error against the test resolution, with the training resolution marked.
+
+    Keys are scalar resolutions or labels such as ``"64x64x32"``; the latter are placed at their
+    first entry and labeled in full.
+    """
+    keys = sorted(resolution_errors, key=resolution_size)
+    resolutions = [resolution_size(key) for key in keys]
+    errors = [resolution_errors[key]["mean"] for key in keys]
     fig, ax = plt.subplots(figsize=(6, 3.4), constrained_layout=True)
     ax.plot(resolutions, errors, color=SERIES_COLORS[0], marker="o", markersize=5)
-    ax.axvline(train_resolution, color=REFERENCE_COLOR, linestyle="--", linewidth=1, label="Trainingsauflösung")
-    ax.set(xscale="log", yscale="log", xlabel="Testauflösung (je Dimension)", ylabel="rel. L2 (Mittel)", title=title)
+    ax.axvline(
+        resolution_size(train_resolution), color=REFERENCE_COLOR, linestyle="--", linewidth=1, label="Trainingsauflösung"
+    )
+    label = "Testauflösung (je Dimension)" if all(isinstance(k, int) for k in keys) else "Testauflösung (Raum × Raum × Zeit)"
+    ax.set(xscale="log", yscale="log", xlabel=label, ylabel="rel. L2 (Mittel)", title=title)
     ax.xaxis.set_major_locator(matplotlib.ticker.FixedLocator(resolutions))
-    ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    ax.xaxis.set_major_formatter(matplotlib.ticker.FixedFormatter([str(key) for key in keys]))
     ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
     _percent_axis(ax)
     ax.legend()
@@ -294,11 +305,53 @@ def plot_solution_2d(problem: Problem, result: EvaluationResult, title: str, pat
     _save(fig, path)
 
 
-#: Solution plot for each ``Problem.plot_type``. ``"2d_t"`` is still missing.
+def plot_solution_2d_t(problem: Problem, result: EvaluationResult, title: str, path: Path) -> None:
+    """One figure per representative example: ``solution_best.png``, ``_median`` and ``_worst``.
+
+    The files are written next to ``path``. Each figure is a 3 x 3 grid: rows analytical, FNO and
+    the absolute error, columns the first, middle and last time. Analytical and FNO share one
+    ``viridis`` scale over all three times, the error has its own ``magma`` scale.
+    """
+    x_name, y_name, t_name = problem.variable_names["coordinates"]
+    u_name = problem.variable_names["solution"][0]
+    grid = result.dataset.grid
+    x = problem.to_physical(x_name, grid[0, :, 0, 0].numpy())
+    y = problem.to_physical(y_name, grid[1, 0, :, 0].numpy())
+    t = problem.to_physical(t_name, grid[2, 0, 0, :].numpy())
+    times = [0, (len(t) - 1) // 2, len(t) - 1]
+    extent = (x[0], x[-1], y[0], y[-1])
+    errors = result.main_errors.numpy()
+    channel = problem.main_channel
+
+    for (label, index), tag in zip(_representative_examples(errors), ("best", "median", "worst")):
+        exact = problem.to_physical(u_name, result.dataset.targets[index, channel].numpy())
+        predicted = problem.to_physical(u_name, result.predictions[index, channel].numpy())
+        error = np.abs(exact - predicted)
+        vmin, vmax = min(exact.min(), predicted.min()), max(exact.max(), predicted.max())
+        error_max = max(float(error.max()), 1e-30)
+
+        fig, axes = plt.subplots(3, 3, figsize=(11, 10), constrained_layout=True)
+        rows = (("Analytisch", exact, "viridis", vmin, vmax), ("FNO", predicted, "viridis", vmin, vmax),
+                ("|Fehler|", error, "magma", 0.0, error_max))
+        for row_axes, (name, field, cmap, low, high) in zip(axes, rows):
+            for ax, time_index in zip(row_axes, times):
+                image = ax.imshow(field[:, :, time_index].T, origin="lower", extent=extent, aspect="equal",
+                                  cmap=cmap, vmin=low, vmax=high)
+                ax.set(xlabel=problem.label(x_name), ylabel=problem.label(y_name),
+                       title=f"{name} · {t_name} = {t[time_index]:.3g} {problem.units[t_name]}")
+                ax.grid(False)
+            unit = problem.label(u_name) if name != "|Fehler|" else f"|Fehler| {problem.label(u_name)}"
+            fig.colorbar(image, ax=row_axes, label=unit, shrink=0.9)
+        fig.suptitle(f"{title}\n{label} (rel. L2 = {100 * errors[index]:.2f} %)")
+        _save(fig, Path(path).with_name(f"solution_{tag}.png"))
+
+
+#: Solution plot for each ``Problem.plot_type``. ``"2d_t"`` writes three files next to ``path``.
 SOLUTION_PLOTTERS: dict[str, Callable[[Problem, EvaluationResult, str, Path], None]] = {
     "1d": plot_solution_1d,
     "1d_t": plot_solution_1d_t,
     "2d": plot_solution_2d,
+    "2d_t": plot_solution_2d_t,
 }
 
 

@@ -18,6 +18,7 @@ from omegaconf import OmegaConf, open_dict
 
 from pino.evaluation import IncompatibleRunError, check_run_compatibility, evaluate_model, write_metrics
 from pino.losses import overridden_keys, resolve_loss_weights
+from pino.numerics.grids import resolution_key
 from pino.models.factory import build_model, count_parameters
 from pino.problems import build_problem
 from pino.trainer import select_device, set_seed
@@ -64,7 +65,7 @@ def main() -> None:
         datetime.now().isoformat(timespec="seconds"),
         history,
     )
-    plot_run(problem, result, history, cfg.training.mode, int(cfg.problem.train_resolution), args.run_dir)
+    plot_run(problem, result, history, cfg.training.mode, resolution_key(cfg.problem.train_resolution), args.run_dir)
     print(json.dumps(metrics["rel_l2"], indent=2))
 
 

@@ -13,13 +13,13 @@
    | `analytical(inputs, grid)` | exact solution `(B, C, *resolution)` |
    | `residual(u, inputs, grid)` | normalized PDE residual on the interior points |
    | `WRAPPER_VERSION` | string, increase it whenever `boundary()` or `output_scale()` change |
-   | `boundary(inputs, grid)` | `(g, φ)` for `u = g + φ·NN`, φ only the fixed shape part; use `numerics.constraints.dirichlet_1d`, `dirichlet_1d_t` or `dirichlet_2d` |
+   | `boundary(inputs, grid)` | `(g, φ)` for `u = g + φ·NN`, φ only the fixed shape part; use `numerics.constraints.dirichlet_1d`, `dirichlet_1d_t`, `dirichlet_2d` or `dirichlet_2d_t` |
    | `to_fno_input(inputs, grid)` | network input `(B, in_channels, *resolution)` including coordinates |
    | `output_scale(inputs, grid)` | optional: per-sample scale s of the output, `constrained` only |
    | `data_scale(inputs, grid)` | optional: typical size of each output channel for the data loss |
    | `SUPPORTED_INPUTS` | required: tuple of input family names, named after what is sampled (e.g. `("linear", "sine")`); the first one is the original family and the default |
    | `n_dims`, `in_channels`, `out_channels` | set the FNO dimension and the channels |
-   | `plot_type` | `"1d"`, `"1d_t"` or `"2d"`; `"2d_t"` is not yet in `visualization.SOLUTION_PLOTTERS` |
+   | `plot_type` | `"1d"`, `"1d_t"`, `"2d"` or `"2d_t"` (writes `solution_best/median/worst.png`); for problems in time, time is the last grid axis |
    | `variable_names`, `units`, `scales` | axis labels and conversion to physical units |
    | `main_variable` | optional, defaults to the first output variable |
 

@@ -208,9 +208,10 @@ The normalizations are explained in the docstrings of the problem classes.
 | `numerics.constraints.dirichlet_1d` | stationary 1D, Dirichlet values on both ends |
 | `numerics.constraints.dirichlet_1d_t` | 1D in time: initial profile u₀(x) and time-dependent end values u_L(t), u_R(t) |
 | `numerics.constraints.dirichlet_2d` | stationary 2D: transfinite (Coons) interpolation of four edge functions |
+| `numerics.constraints.dirichlet_2d_t` | 2D in time: g = u₀(x, y) + Coons(edges(t)) − Coons(edges(t₀)), φ = τ·x(1−x)·y(1−y) |
 | `numerics.derivatives.laplacian` | second-order Laplacian in any number of dimensions |
 | `numerics.derivatives.face_flux`, `conservative_divergence` | fluxes k(u′ + g) on faces and their divergence |
-| `pdes.diffusion.diffusion_residual` | ∂u/∂t − D ∂²u/∂x², D scalar or per sample |
+| `pdes.diffusion.diffusion_residual` | ∂u/∂t − D·Δu in any number of space dimensions (time last), Δ via `laplacian`; D scalar or per sample |
 
 ### Planned
 

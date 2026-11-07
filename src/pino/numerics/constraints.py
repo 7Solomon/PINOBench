@@ -106,3 +106,48 @@ def dirichlet_2d(
     g = (1 - xs) * left + xs * right + (1 - ys) * bottom + ys * top - corners
     phi = (xs * (1 - xs) * ys * (1 - ys))[None, None]
     return g, phi
+
+
+def dirichlet_2d_t(
+    x: Tensor,
+    y: Tensor,
+    t: Tensor,
+    initial: Tensor,
+    bottom: Tensor,
+    top: Tensor,
+    left: Tensor,
+    right: Tensor,
+) -> tuple[Tensor, Tensor]:
+    """Constraint for a 2D problem in time with an initial field and Dirichlet edges in time.
+
+    With ``tau = (t - t0) / (t_end - t0)`` and ``Coons`` the transfinite interpolation of
+    :func:`dirichlet_2d`, the constraint is
+
+        g(x, y, t) = u0(x, y) + [Coons(edges(t)) - Coons(edges(t0))](x, y),
+        phi(x, y, t) = tau x (1 - x) y (1 - y).
+
+    ``g`` reproduces ``u0`` at ``t = t0`` and every edge at every time if the data are
+    compatible: the edges agree in the corners at every time (e.g. ``L(0, t) == B(0, t)``) and
+    ``u0`` matches the edges at ``t0``.
+
+    Args:
+        x: Points ``(Nx,)`` from 0 to 1, along dimension ``-3`` of the field.
+        y: Points ``(Ny,)`` from 0 to 1, along dimension ``-2``.
+        t: Times ``(Nt,)`` along dimension ``-1``, ``t[0]`` is the initial time ``t0``.
+        initial: ``u0(x, y)``, shape ``(B, C, Nx, Ny)``.
+        bottom: ``u(x, 0, t)``, shape ``(B, C, Nx, Nt)``.
+        top: ``u(x, 1, t)``, shape ``(B, C, Nx, Nt)``.
+        left: ``u(0, y, t)``, shape ``(B, C, Ny, Nt)``.
+        right: ``u(1, y, t)``, shape ``(B, C, Ny, Nt)``.
+
+    Returns:
+        ``g`` of shape ``(B, C, Nx, Ny, Nt)`` and ``phi`` of shape ``(1, 1, Nx, Ny, Nt)``.
+    """
+    # Time as a leading batch dimension: dirichlet_2d works on edges (..., N) per time.
+    edges = (edge.movedim(-1, -2) for edge in (bottom, top, left, right))
+    coons, phi_space = dirichlet_2d(x, y, *edges)  # (B, C, Nt, Nx, Ny)
+    coons = coons.movedim(-3, -1)  # (B, C, Nx, Ny, Nt)
+    g = initial[..., None] + (coons - coons[..., :1])
+    tau = (t - t[0]) / (t[-1] - t[0])
+    phi = phi_space[..., None] * tau
+    return g, phi

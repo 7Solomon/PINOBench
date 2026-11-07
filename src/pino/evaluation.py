@@ -12,6 +12,7 @@ from torch import Tensor, nn
 from pino.data.dataset import OperatorDataset, build_dataset
 from pino.losses import boundary_loss
 from pino.numerics.constraints import apply_hard_constraint
+from pino.numerics.grids import resolution_key
 from pino.problems.base import Problem
 
 
@@ -83,8 +84,8 @@ class EvaluationResult:
     #: Relative L2 per example and output channel, ``(B, C)``.
     errors: Tensor
     main_channel: int
-    #: Resolution -> variable -> summary.
-    resolution_errors: dict[int, dict[str, dict[str, float]]]
+    #: Resolution key (see ``resolution_key``) -> variable -> summary.
+    resolution_errors: dict[int | str, dict[str, dict[str, float]]]
     main_variable: str
     #: Boundary error per example and output channel, ``(B, C)``, see :func:`boundary_errors`.
     bc_errors: Tensor | None = None
@@ -157,7 +158,7 @@ def evaluate_model(model: nn.Module, problem: Problem, cfg, device: torch.device
     for resolution in cfg.problem.resolution_study:
         study = build_dataset(problem, n_test, resolution, seed)
         _, study_errors, _ = predict_dataset(model, problem, study, device, batch_size)
-        resolution_errors[int(resolution)] = summarize_per_variable(problem, study_errors)
+        resolution_errors[resolution_key(resolution)] = summarize_per_variable(problem, study_errors)
     return EvaluationResult(
         dataset, predictions, errors, problem.main_channel, resolution_errors, problem.main_variable, bc_errors
     )
@@ -233,8 +234,8 @@ def write_metrics(
         "resolution_study": {str(k): v for k, v in result.main_resolution_errors().items()},
         "resolution_study_per_variable": {str(k): v for k, v in result.resolution_errors.items()},
         **boundary_error_summary(problem, result.bc_errors),
-        "train_resolution": int(cfg.problem.train_resolution),
-        "test_resolution": int(cfg.problem.test_resolution),
+        "train_resolution": resolution_key(cfg.problem.train_resolution),
+        "test_resolution": resolution_key(cfg.problem.test_resolution),
         "training_time_s": training_time_s,
         "best_epoch": best_epoch,
         "selection": (history or {}).get("selection"),

@@ -29,3 +29,15 @@ def grid_spacing(grid: Tensor, axis: int) -> float:
     coordinate = grid[axis]
     n = coordinate.shape[axis]
     return float((coordinate.narrow(axis, n - 1, 1).flatten()[0] - coordinate.flatten()[0]) / (n - 1))
+
+
+def resolution_key(resolution: int | Sequence[int]) -> int | str:
+    """Label of a resolution in metrics and plots: ``64`` for a scalar, ``"64x64x32"`` otherwise."""
+    if isinstance(resolution, int):
+        return resolution
+    return "x".join(str(int(r)) for r in resolution)
+
+
+def resolution_size(key: int | str) -> int:
+    """Points along the first axis of a :func:`resolution_key`, used as the plot coordinate."""
+    return key if isinstance(key, int) else int(key.split("x")[0])

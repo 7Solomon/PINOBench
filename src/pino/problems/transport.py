@@ -9,7 +9,7 @@ from torch import Tensor
 
 from pino.analytical.diffusion import crank_erfc
 from pino.numerics.constraints import dirichlet_1d_t
-from pino.numerics.grids import as_resolution, grid_spacing, uniform_grid
+from pino.numerics.grids import as_resolution, uniform_grid
 from pino.pdes.diffusion import diffusion_residual
 from pino.problems.base import Problem
 from pino.problems.registry import register_problem
@@ -70,8 +70,7 @@ class Chloride1D(Problem):
         Dividing by ``D`` instead would weight samples with small ``D`` up to 5 times more.
         """
         surface, diffusivity = (inputs[:, i, None, None, None] for i in range(2))
-        dx, dt = grid_spacing(grid, 0), grid_spacing(grid, 1)
-        return diffusion_residual(u, dx, dt, diffusivity) * (self.t_start / surface)
+        return diffusion_residual(u, grid, diffusivity) * (self.t_start / surface)
 
     def boundary(self, inputs: Tensor, grid: Tensor) -> tuple[Tensor, Tensor]:
         """``dirichlet_1d_t`` with ``C(x, t0)``, ``C(0, t) = Cs`` and ``C(1, t)`` from the solution."""
