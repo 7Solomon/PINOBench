@@ -83,6 +83,11 @@ def plot_training(history: dict, title: str, path: Path) -> None:
         linewidth=1.2,
         label="physics (Validierung)",
     )
+    if history.get("val_bc"):
+        color = SERIES_COLORS[names.index("bc") % len(SERIES_COLORS)] if "bc" in names else REFERENCE_COLOR
+        ax_loss.plot(
+            history["eval_epochs"], history["val_bc"], color=color, linestyle="--", linewidth=1.2, label="bc (Validierung)"
+        )
     ax_loss.set(yscale="log", xlabel="Epoche", ylabel="Loss", title="Loss-Komponenten")
     ax_loss.legend()
 
@@ -98,7 +103,9 @@ def plot_training(history: dict, title: str, path: Path) -> None:
         ha="right",
         color=REFERENCE_COLOR,
     )
-    criterion = "physics-Loss" if history["selection"] == "val_physics" else "rel. L2 aller Variablen"
+    criterion = {"val_physics": "physics-Loss", "val_objective": "physics + bc"}.get(
+        history["selection"], "rel. L2 aller Variablen"
+    )
     for ax in (ax_loss, ax_error):
         ax.axvline(best, color=REFERENCE_COLOR, linestyle=":", linewidth=1)
     ax_error.plot([], [], color=REFERENCE_COLOR, linestyle=":", linewidth=1, label=f"Checkpoint ({criterion})")

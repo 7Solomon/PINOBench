@@ -2,6 +2,7 @@ mode: data
 weights:
   physics: 0.0
   data: 1.0
+  bc: 10.0       # boundary penalty L_bc, only with output_param=soft
 epochs: 500
 batch_size: 32
 lr: 1.0e-3

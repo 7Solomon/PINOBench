@@ -34,25 +34,25 @@ def test_overridden_keys_parses_hydra_overrides():
 
 def test_problem_loss_weights_replace_training_weights_in_hybrid_only():
     darcy = problem_cfg("darcy_layered_1d")
-    assert resolve_loss_weights(training_cfg("hybrid"), darcy) == {"physics": 1.0, "data": 300.0}
+    assert resolve_loss_weights(training_cfg("hybrid"), darcy) == {"physics": 1.0, "data": 300.0, "bc": 10.0}
     # Single-term modes keep their fixed weights.
-    assert resolve_loss_weights(training_cfg("physics"), darcy) == {"physics": 1.0, "data": 0.0}
-    assert resolve_loss_weights(training_cfg("data"), darcy) == {"physics": 0.0, "data": 1.0}
+    assert resolve_loss_weights(training_cfg("physics"), darcy) == {"physics": 1.0, "data": 0.0, "bc": 10.0}
+    assert resolve_loss_weights(training_cfg("data"), darcy) == {"physics": 0.0, "data": 1.0, "bc": 10.0}
 
 
 def test_problems_without_loss_weights_keep_the_global_weights():
     for name in ("heat_1d", "beam_1d", "richards_steady_1d"):
         assert "loss_weights" not in problem_cfg(name)
-        assert resolve_loss_weights(training_cfg("hybrid"), problem_cfg(name)) == {"physics": 1.0, "data": 1.0}
+        assert resolve_loss_weights(training_cfg("hybrid"), problem_cfg(name)) == {"physics": 1.0, "data": 1.0, "bc": 10.0}
 
 
 def test_command_line_override_wins_over_problem_loss_weights():
     training = training_cfg("hybrid")
     training.weights.data = 50.0  # as Hydra would apply training.weights.data=50
     weights = resolve_loss_weights(training, problem_cfg("darcy_layered_1d"), {"training.weights.data"})
-    assert weights == {"physics": 1.0, "data": 50.0}
+    assert weights == {"physics": 1.0, "data": 50.0, "bc": 10.0}
     weights = resolve_loss_weights(training, problem_cfg("darcy_layered_1d"), {"training.weights"})
-    assert weights == {"physics": 1.0, "data": 50.0}
+    assert weights == {"physics": 1.0, "data": 50.0, "bc": 10.0}
 
 
 def test_unknown_loss_term_is_rejected():

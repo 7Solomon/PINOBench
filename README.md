@@ -30,6 +30,7 @@ python scripts/train.py problem=richards_steady_1d training=physics training.epo
 # variants (defaults: the benchmark's original input family, output_param constrained)
 python scripts/train.py problem=beam_1d_sine training=physics problem.output_param=unscaled
 python scripts/train.py problem=beam_1d training=data problem.output_param=direct seed=1
+python scripts/train.py problem=heat_1d training=physics problem.output_param=soft training.weights.bc=100
 
 # re-evaluate and re-plot a finished run (refuses runs with a different wrapper)
 python scripts/evaluate.py outputs/heat_1d/sine-constrained/physics/<timestamp>
@@ -44,8 +45,8 @@ Each run writes to `outputs/<benchmark>/<inputs>-<output_param>/<mode>/<timestam
 | File | Content |
 |---|---|
 | `best_model.pt` | weights with the best validation score, rewritten on every improvement |
-| `history.json` | loss components, validation physics loss and validation rel. L2 per epoch |
-| `metrics.json` | rel. L2 per variable (mean, median, max), resolution study, time, parameters |
+| `history.json` | loss components per epoch (`physics`, `data`, `bc`, `total`), validation physics loss (and `val_bc` for `soft`) and validation rel. L2 |
+| `metrics.json` | rel. L2 per variable (mean, median, max), boundary error `bc_error_mean`/`bc_error_max` per variable, resolution study, time, parameters |
 | `training.png` | loss components and validation error with a 5 % line and the selected epoch |
 | `solution.png` | best, median and worst test example |
 | `error_hist.png` | distribution of the rel. L2 over the test set |
@@ -65,6 +66,8 @@ are ignored.
 | `data` | MSE against the analytical solution, normalized per variable | training target |
 | `hybrid` | `weights.physics · physics + weights.data · data` | training target |
 
+With `output_param: soft` every mode adds `weights.bc · L_bc` (see Variants).
+
 Defaults: Adam with lr = 1e-3 and a cosine schedule, 500 epochs, batch size 32, 1000 training,
 200 validation and 200 test examples, each drawn with its own seed.
 
@@ -72,7 +75,7 @@ Defaults: Adam with lr = 1e-3 and a cosine schedule, 500 epochs, batch size 32, 
 
 | Mode | Checkpoint selected by (validation set) |
 |---|---|
-| `physics` | physics loss, without the analytical solution |
+| `physics` | physics loss, without the analytical solution; with `soft` the objective physics + `weights.bc` · L_bc |
 | `data`, `hybrid` | mean rel. L2 over **all** output variables |
 
 The validation rel. L2 is logged in every mode, in `physics` mode for observation only. The
@@ -90,7 +93,8 @@ loss_weights: {physics: 1.0, data: 300.0}
 ```
 
 which replaces `training.weights` in `hybrid` mode; `physics` and `data` keep their single
-fixed term. Only `darcy_layered_1d` sets it, because its hybrid run did not reach the data
+fixed term. `bc` (the weight of `L_bc`, default 10 in the training YAMLs) may also be set there and
+acts in every mode. Only `darcy_layered_1d` sets it, because its hybrid run did not reach the data
 mode's accuracy at 1:1. A command-line override such as `training.weights.data=50` still wins.
 
 ### Variants
@@ -101,13 +105,14 @@ original benchmarks.
 | Switch | Values | Default |
 |---|---|---|
 | `inputs` | input families of the benchmark, see the table below | the first one, the original family |
-| `output_param` | `constrained`, `unscaled`, `direct` | `constrained` |
+| `output_param` | `constrained`, `unscaled`, `direct`, `soft` | `constrained` |
 
 | `output_param` | Prediction | Modes |
 |---|---|---|
 | `constrained` | u = g + φ·s·NN, s = `output_scale(inputs)` per sample or 1 | all |
 | `unscaled` | u = g + φ·c·NN, c = `output_scale_global` per channel from the YAML (default 1) | all |
 | `direct` | u = c·NN, no boundary values | `data` only |
+| `soft` | u = c·NN; boundary and initial values through the penalty `L_bc` | all |
 
 g and φ come from `boundary()`, where φ is only the fixed shape part such as x(1−x). Only
 `beam_1d` has a per-sample scale s = (w_c, M_c). `output_scale_global` is the RMS of each
@@ -115,6 +120,20 @@ output over a large sample of the input family, rounded. Loss normalizations (`d
 scaling) may still depend on the inputs per sample; they act on the loss, not on the output.
 `direct` is refused in `physics` and `hybrid`: without the hard constraint and without a
 boundary loss the PDE does not determine the solution.
+
+**Soft constraints.** `soft` predicts like `direct` but adds, in every mode,
+
+    L_bc = mean over the boundary points of ((u − g) / s)²,   weight `weights.bc` (default 10)
+
+The boundary points are exactly those where the hard constraint acts, φ = 0 in `boundary()`:
+the Dirichlet edges and, for problems in time, the initial time slice (`Problem.boundary_values`;
+a test checks the mask against the grid coordinates for every problem). g are the values of
+`boundary()` there. s is the data-loss normalization `data_scale()`, otherwise the global
+constant c (1 if unset). In `physics` mode the checkpoint is chosen by physics + `weights.bc` · L_bc
+on the validation set, because the residual alone does not see the boundary values.
+`metrics.json` reports for every variant the boundary error max|u − g| over the boundary
+points relative to max|u_exact| over the domain, per test example, as mean (`bc_error_mean`)
+and maximum (`bc_error_max`) over the test set; with the hard constraint it is 0.
 
 Variant configs inherit from the base YAML through Hydra `defaults`, e.g.
 `configs/problem/beam_1d_sine.yaml`. `output_param` is set as an override. The pilot of all

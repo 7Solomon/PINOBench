@@ -10,6 +10,7 @@ import torch
 from torch import Tensor, nn
 
 from pino.data.dataset import OperatorDataset, build_dataset
+from pino.losses import boundary_loss
 from pino.numerics.constraints import apply_hard_constraint
 from pino.problems.base import Problem
 
@@ -25,6 +26,19 @@ def relative_l2(prediction: Tensor, target: Tensor) -> Tensor:
     batch, channels = target.shape[:2]
     difference = (prediction - target).reshape(batch, channels, -1).norm(dim=-1)
     return difference / target.reshape(batch, channels, -1).norm(dim=-1)
+
+
+def boundary_errors(problem: Problem, prediction: Tensor, target: Tensor, inputs: Tensor, grid: Tensor) -> Tensor:
+    """Boundary error per example and channel, ``(B, C)``.
+
+    ``max |u - g|`` over the boundary points of :meth:`Problem.boundary_values`, relative to
+    ``max |u_exact|`` over the whole domain. The reference is the analytical solution, not the
+    prediction, so a trivial prediction ``u ~ 0`` cannot shrink the error. About zero for the
+    hard constraint (``constrained``, ``unscaled``) by construction.
+    """
+    g, mask = problem.boundary_values(inputs, grid)
+    deviation = ((prediction - g).abs() * mask).flatten(2).amax(dim=-1)
+    return deviation / target.abs().flatten(2).amax(dim=-1)
 
 
 def summarize_errors(errors: Tensor) -> dict[str, float]:
@@ -44,19 +58,20 @@ def summarize_per_variable(problem: Problem, errors: Tensor) -> dict[str, dict[s
 def predict_dataset(
     model: nn.Module, problem: Problem, dataset: OperatorDataset, device: torch.device, batch_size: int = 32
 ) -> tuple[Tensor, Tensor]:
-    """Return all predictions and the errors ``(B, C)``, both on the CPU."""
+    """Return all predictions, the rel. L2 ``(B, C)`` and the boundary errors ``(B, C)``, on the CPU."""
     was_training = model.training
     model.eval()
     grid = dataset.grid.to(device)
-    predictions, errors = [], []
+    predictions, errors, bc_errors = [], [], []
     for start in range(0, len(dataset), batch_size):
         inputs = dataset.inputs[start : start + batch_size].to(device)
         target = dataset.targets[start : start + batch_size].to(device)
         prediction = predict(model, problem, inputs, grid)
         predictions.append(prediction.cpu())
         errors.append(relative_l2(prediction, target).cpu())
+        bc_errors.append(boundary_errors(problem, prediction, target, inputs, grid).cpu())
     model.train(was_training)
-    return torch.cat(predictions), torch.cat(errors)
+    return torch.cat(predictions), torch.cat(errors), torch.cat(bc_errors)
 
 
 @dataclass
@@ -71,6 +86,8 @@ class EvaluationResult:
     #: Resolution -> variable -> summary.
     resolution_errors: dict[int, dict[str, dict[str, float]]]
     main_variable: str
+    #: Boundary error per example and output channel, ``(B, C)``, see :func:`boundary_errors`.
+    bc_errors: Tensor | None = None
 
     @property
     def main_errors(self) -> Tensor:
@@ -92,10 +109,12 @@ def validation_seed(seed: int) -> int:
 
 @dataclass
 class ValidationResult:
-    """Errors against the analytical solution ``(B, C)`` and the mean physics loss."""
+    """Errors against the analytical solution ``(B, C)``, the mean physics loss and, with
+    ``output_param = soft``, the mean boundary penalty ``L_bc``."""
 
     errors: Tensor
     physics: float
+    bc: float | None = None
 
 
 @torch.no_grad()
@@ -110,7 +129,7 @@ def validate(
     was_training = model.training
     model.eval()
     grid = dataset.grid.to(device)
-    errors, squared, count = [], 0.0, 0
+    errors, squared, count, bc_total = [], 0.0, 0, 0.0
     for start in range(0, len(dataset), batch_size):
         inputs = dataset.inputs[start : start + batch_size].to(device)
         target = dataset.targets[start : start + batch_size].to(device)
@@ -118,9 +137,12 @@ def validate(
         residual = problem.residual(prediction, inputs, grid)
         squared += residual.pow(2).sum().item()
         count += residual.numel()
+        if problem.soft_constraint:
+            bc_total += boundary_loss(problem, prediction, inputs, grid).item() * inputs.shape[0]
         errors.append(relative_l2(prediction, target).cpu())
     model.train(was_training)
-    return ValidationResult(torch.cat(errors), squared / count)
+    bc = bc_total / len(dataset) if problem.soft_constraint else None
+    return ValidationResult(torch.cat(errors), squared / count, bc)
 
 
 def evaluate_model(model: nn.Module, problem: Problem, cfg, device: torch.device) -> EvaluationResult:
@@ -129,16 +151,27 @@ def evaluate_model(model: nn.Module, problem: Problem, cfg, device: torch.device
     batch_size = int(cfg.training.batch_size)
     n_test = int(cfg.training.n_test)
     dataset = build_dataset(problem, n_test, cfg.problem.test_resolution, seed)
-    predictions, errors = predict_dataset(model, problem, dataset, device, batch_size)
+    predictions, errors, bc_errors = predict_dataset(model, problem, dataset, device, batch_size)
 
     resolution_errors = {}
     for resolution in cfg.problem.resolution_study:
         study = build_dataset(problem, n_test, resolution, seed)
-        _, study_errors = predict_dataset(model, problem, study, device, batch_size)
+        _, study_errors, _ = predict_dataset(model, problem, study, device, batch_size)
         resolution_errors[int(resolution)] = summarize_per_variable(problem, study_errors)
     return EvaluationResult(
-        dataset, predictions, errors, problem.main_channel, resolution_errors, problem.main_variable
+        dataset, predictions, errors, problem.main_channel, resolution_errors, problem.main_variable, bc_errors
     )
+
+
+def boundary_error_summary(problem: Problem, bc_errors: Tensor | None) -> dict[str, dict[str, float]]:
+    """``bc_error_mean`` and ``bc_error_max`` over the test examples, per output variable."""
+    if bc_errors is None:
+        return {}
+    names = problem.variable_names["solution"]
+    return {
+        "bc_error_mean": {name: bc_errors[:, c].mean().item() for c, name in enumerate(names)},
+        "bc_error_max": {name: bc_errors[:, c].max().item() for c, name in enumerate(names)},
+    }
 
 
 class IncompatibleRunError(ValueError):
@@ -199,6 +232,7 @@ def write_metrics(
         "rel_l2_per_variable": summarize_per_variable(problem, result.errors),
         "resolution_study": {str(k): v for k, v in result.main_resolution_errors().items()},
         "resolution_study_per_variable": {str(k): v for k, v in result.resolution_errors.items()},
+        **boundary_error_summary(problem, result.bc_errors),
         "train_resolution": int(cfg.problem.train_resolution),
         "test_resolution": int(cfg.problem.test_resolution),
         "training_time_s": training_time_s,

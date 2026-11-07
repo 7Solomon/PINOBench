@@ -18,7 +18,9 @@ from torch import Tensor
 
 
 #: Output parametrizations, see :meth:`Problem.output_parametrization`.
-OUTPUT_PARAMS = ("constrained", "unscaled", "direct")
+OUTPUT_PARAMS = ("constrained", "unscaled", "direct", "soft")
+#: Output parametrizations without g and phi in the prediction: ``u = c NN``.
+UNCONSTRAINED = ("direct", "soft")
 
 
 class Problem(ABC):
@@ -134,8 +136,10 @@ class Problem(ABC):
           (or 1). The original behavior.
         * ``unscaled``: ``u = g + phi c NN`` with the global constant ``c``.
         * ``direct``: ``u = c NN``, no boundary values. Only allowed in ``data`` mode.
+        * ``soft``: ``u = c NN`` as ``direct``; the boundary and initial values enter the loss
+          instead (``L_bc``, see :func:`pino.losses.boundary_loss`). Allowed in every mode.
         """
-        if self.output_param == "direct":
+        if self.output_param in UNCONSTRAINED:
             c = self.global_output_scale(grid)
             return torch.zeros((), dtype=grid.dtype, device=grid.device), c
         g, phi = self.boundary(inputs, grid)
@@ -143,6 +147,30 @@ class Problem(ABC):
             return g, phi * self.global_output_scale(phi)
         scale = self.output_scale(inputs, grid)
         return g, phi if scale is None else phi * scale
+
+    @property
+    def soft_constraint(self) -> bool:
+        """Whether boundary and initial values are enforced by the penalty ``L_bc``."""
+        return self.output_param == "soft"
+
+    def boundary_values(self, inputs: Tensor, grid: Tensor) -> tuple[Tensor, Tensor]:
+        """Return ``(g, mask)``: prescribed values and the points where they are prescribed.
+
+        The points are exactly those where the hard constraint acts, ``phi == 0`` in
+        :meth:`boundary`: the Dirichlet boundaries and, for problems in time, the initial time
+        slice. ``phi`` is built from products of ``x``, ``1 - x`` and ``tau``, which are exactly
+        zero on the boundary nodes of :func:`~pino.numerics.grids.uniform_grid` and nowhere
+        else (checked for every problem in ``tests/test_soft.py``). ``mask`` is a bool tensor of
+        shape ``(1, 1, *resolution)``, ``g`` has shape ``(B, C, *resolution)``.
+        """
+        g, phi = self.boundary(inputs, grid)
+        mask = (phi == 0).expand(1, 1, *grid.shape[1:])
+        return g.expand(inputs.shape[0], self.out_channels, *grid.shape[1:]), mask
+
+    def boundary_scale(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        """Normalization ``s`` of ``L_bc``: :meth:`data_scale`, otherwise the global constant ``c``."""
+        scale = self.data_scale(inputs, grid)
+        return self.global_output_scale(grid) if scale is None else scale
 
     def check_mode(self, mode: str) -> None:
         """Reject training modes that are ill-posed for the output parametrization."""
