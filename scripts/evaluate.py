@@ -17,7 +17,7 @@ import torch
 from omegaconf import OmegaConf, open_dict
 
 from pino.evaluation import IncompatibleRunError, check_run_compatibility, evaluate_model, write_metrics
-from pino.losses import overridden_keys, resolve_loss_weights
+from pino.losses import overridden_keys, resolve_loss_weights, resolve_training_settings
 from pino.numerics.grids import resolution_key
 from pino.models.factory import build_model, count_parameters
 from pino.problems import build_problem
@@ -49,6 +49,7 @@ def main() -> None:
     overrides = overridden_keys(OmegaConf.load(args.run_dir / ".hydra" / "overrides.yaml"))
     with open_dict(cfg):
         cfg.training.weights = OmegaConf.create(resolve_loss_weights(cfg.training, cfg.problem, overrides))
+        cfg.training.update(resolve_training_settings(cfg.training, cfg.problem, overrides))
     model = build_model(cfg.model, problem, cfg.problem.train_resolution).to(device)
     state = torch.load(args.run_dir / "best_model.pt", map_location=device, weights_only=False)
     model.load_state_dict(state)

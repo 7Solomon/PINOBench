@@ -11,7 +11,7 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf, open_dict
 
 from pino.evaluation import evaluate_model, write_metrics
-from pino.losses import overridden_keys, resolve_loss_weights
+from pino.losses import overridden_keys, resolve_loss_weights, resolve_training_settings
 from pino.numerics.grids import resolution_key
 from pino.models.factory import build_model, count_parameters
 from pino.problems import build_problem
@@ -31,13 +31,17 @@ def main(cfg: DictConfig) -> None:
     overrides = overridden_keys(HydraConfig.get().overrides.task)
     with open_dict(cfg):
         cfg.training.weights = OmegaConf.create(resolve_loss_weights(cfg.training, cfg.problem, overrides))
+        cfg.training.update(resolve_training_settings(cfg.training, cfg.problem, overrides))
     model = build_model(cfg.model, problem, cfg.problem.train_resolution).to(device)
     n_parameters = count_parameters(model)
     log.info(
-        "%s, mode %s, weights %s, %d parameters on %s",
+        "%s, mode %s, weights %s, %d epochs, batch %d, %d training examples, %d parameters on %s",
         problem.name,
         cfg.training.mode,
         dict(cfg.training.weights),
+        cfg.training.epochs,
+        cfg.training.batch_size,
+        cfg.training.n_train,
         n_parameters,
         device,
     )

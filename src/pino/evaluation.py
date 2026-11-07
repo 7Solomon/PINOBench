@@ -240,6 +240,7 @@ def write_metrics(
         "best_epoch": best_epoch,
         "selection": (history or {}).get("selection"),
         "loss_weights": {name: float(value) for name, value in cfg.training.weights.items()},
+        "training_settings": {key: cfg.training[key] for key in ("epochs", "batch_size", "lr", "n_train") if key in cfg.training},
         "n_parameters": n_parameters,
     }
     Path(path).write_text(json.dumps(metrics, indent=2))

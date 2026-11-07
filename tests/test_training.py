@@ -119,3 +119,18 @@ def test_short_training_selects_by_the_validation_criterion(tmp_path, mode):
     assert set(result.val_rel_l2) == {"w", "M"} and len(result.val_physics) == 4
     history = json.loads((tmp_path / HISTORY).read_text())
     assert history["best_epoch"] == result.best_epoch and (tmp_path / "best_model.pt").exists()
+
+
+def test_problem_training_block_sets_budget_unless_overridden():
+    from pino.losses import resolve_training_settings
+
+    heat_2d = OmegaConf.create({"training": {"epochs": 200, "batch_size": 8}})  # as in heat_2d.yaml
+    settings = resolve_training_settings(training_cfg("physics"), heat_2d)
+    assert settings["epochs"] == 200 and settings["batch_size"] == 8 and settings["n_train"] == 1000
+    assert resolve_training_settings(training_cfg("physics"), heat_2d, {"training.epochs"})["epochs"] == 500
+    # Selecting the training group (training=hybrid) is not an override of its keys.
+    assert resolve_training_settings(training_cfg("hybrid"), heat_2d, {"training", "problem"})["batch_size"] == 8
+    # Problems without the block keep the training config.
+    assert resolve_training_settings(training_cfg("data"), problem_cfg("heat_1d"))["epochs"] == 500
+    with pytest.raises(KeyError):
+        resolve_training_settings(training_cfg("data"), OmegaConf.create({"training": {"mode": "data"}}))

@@ -165,6 +165,43 @@ scaling change. `metrics.json` and `history.json` store `wrapper_version`, `inpu
 checkpoint holds only NN, so the old heat_1d checkpoints (φ = t·x(1−x), version 1) gave about
 2280 % error with the current wrapper (version 2).
 
+### 3D FNO: memory and runtime (2D + t)
+
+The problems in time over two space dimensions use a 3D FNO over (x, y, t); time is the last
+grid axis (neuraloperator 2.0.0 is only correct for odd sizes in the last dimension, see the
+grid check in `models/factory.py`). Measured with `scripts/measure_step.py` on an NVIDIA
+A100-PCIE-40GB: one training step (prediction with the hard constraint, `hybrid` loss,
+backward, Adam) of `fno_small` (4 layers, 32 channels, padding 0.25) for chloride_corner_2d
+(5 input channels), peak allocated memory and mean time after a warm-up:
+
+| Grid (x × y × t) | Batch | n_modes 16 (18.9 M parameters) | n_modes 8 (2.6 M) |
+|---|---|---|---|
+| 32 × 32 × 32 | 4 | 1.5 GiB, 34 ms | |
+| 32 × 32 × 32 | 8 | 2.8 GiB, 57 ms | 2.6 GiB, 55 ms |
+| 32 × 32 × 32 | 16 | 5.4 GiB, 106 ms | 5.2 GiB, 102 ms |
+| 32 × 32 × 64 | 8 | | 5.2 GiB, 105 ms |
+| 64 × 64 × 32 | 4 | 5.4 GiB, 106 ms | |
+| 64 × 64 × 32 | 8 | 10.6 GiB, 202 ms | 10.4 GiB, 199 ms |
+| 64 × 64 × 32 | 16 | 20.9 GiB, 394 ms | 20.7 GiB, 391 ms |
+| 64 × 64 × 64 | 4 | 10.5 GiB, 208 ms | |
+| 64 × 64 × 64 | 8 | 20.8 GiB, 405 ms | |
+| 64 × 64 × 64 | 16 | out of memory | |
+
+Memory and time grow linearly with the number of grid points × batch (about 7 ms per example
+at 32³); the number of modes changes the parameters but hardly the time (n_modes 12: same
+times, 8.3 M parameters). 1000 examples × 500 epochs as in 1D would take 60 min at 32³ and
+3.5 h at 64 × 64 × 32.
+
+**Choice** for heat_2d and chloride_corner_2d: grid **32 × 32 × 32**, batch **8**,
+`fno_small` with n_modes **16** per axis (= N/2), **200 epochs** of 1000 examples, i.e.
+125 steps × 57 ms ≈ 7 s per epoch, ≈ 25 min per run including validation. The problem YAMLs set
+`epochs` and `batch_size` in their optional `training` block, which replaces the training
+config unless `training.<key>` is given on the command line (allowed keys: `epochs`,
+`batch_size`, `lr`, `n_train`, `n_val`, `n_test`, `eval_every`). On this grid the fastest
+heat_2d mode decays by exp(−178 Δt) = 0.751 per time step, and the thinnest chloride front
+(2√(D_min t₀) = 0.179) spans 5.5 grid points. The resolution study scales space and time
+together: 24³, 32³, 48³, 64³.
+
 ## Restore points (Sicherungspunkte)
 
 The state after Phase 3 is tagged `pre-variants` (on `main`); the variant work lives on

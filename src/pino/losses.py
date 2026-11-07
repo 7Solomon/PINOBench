@@ -79,6 +79,28 @@ def overridden_keys(overrides: Iterable[str]) -> set[str]:
     return {override.split("=", 1)[0].lstrip("+~") for override in overrides}
 
 
+#: Training settings a problem YAML may change in its optional ``training`` block.
+PROBLEM_TRAINING_KEYS = ("epochs", "batch_size", "lr", "n_train", "n_val", "n_test", "eval_every")
+
+
+def resolve_training_settings(training_cfg, problem_cfg, overridden: Iterable[str] = ()) -> dict:
+    """Return the training settings of a run after the problem's optional ``training`` block.
+
+    Order of precedence, highest first: ``training.<key>`` on the command line, the problem's
+    ``training.<key>``, the training config. Used by expensive problems (2D+t) to fix their own
+    epochs and batch size, so that a plain ``train.py problem=<name>`` stays within budget.
+    """
+    overridden = set(overridden)
+    settings = {}
+    for key, value in (problem_cfg.get("training") or {}).items():
+        if key not in PROBLEM_TRAINING_KEYS:
+            raise KeyError(f"Problem training block may set {PROBLEM_TRAINING_KEYS}, not '{key}'.")
+        # ``training=physics`` on the command line selects the config group, it overrides nothing.
+        if f"training.{key}" not in overridden:
+            settings[key] = value
+    return {key: settings.get(key, training_cfg[key]) for key in PROBLEM_TRAINING_KEYS}
+
+
 def resolve_loss_weights(training_cfg, problem_cfg, overridden: Iterable[str] = ()) -> dict[str, float]:
     """Return the loss weights of a run.
 
