@@ -40,13 +40,13 @@ python scripts/evaluate.py <run_dir> --allow-legacy  # runs without wrapper_vers
 python scripts/summarize.py
 
 # evaluate a trained model on one hand-made input (see "Exploring a trained model")
-python scripts/predict.py outputs/heat_1d/sine-constrained/physics/<timestamp> --inputs 1,0,0.5,0,0 --name half_mode
+python scripts/predict.py heat_1d --inputs 1,0,0.5,0,0 --name half_mode   # newest physics/constrained run
+python scripts/predict.py heat_1d --mode data --output-param soft --inputs 1,0,0.5,0,0
 ```
 
 ### Exploring a trained model
 
-`pino.inference` loads a finished run (`load_run`, with the same wrapper check as
-`evaluate.py`) and evaluates its model on one hand-made operator input (`predict_one`):
+`pino.inference` loads a finished run and evaluates its model on one hand-made operator input (`predict_one`):
 prediction, analytical solution, rel. L2 and boundary error per variable, on the test grid or
 any other resolution. Inputs are given in the problem's own parametrization, the layout of
 `sample_inputs` for one example (heat_1d: b₁…b₅; chloride_1d: Cs, D; darcy_poisson_2d: the
@@ -55,8 +55,16 @@ by default the extremes of 20 000 samples, with 1 % tolerance) are evaluated as 
 flagged as extrapolation. Only the operator inputs can be varied: heat_1d, for example, has
 no boundary values among its inputs.
 
-- `scripts/predict.py <run_dir> --inputs … [--resolution 128 | 64x64x32] [--name …]`;
-  `--show-ranges` prints the trained ranges, `--no-save` only prints the result.
+Runs are chosen by `find_run(benchmark, mode, output_param, inputs, seed)`, the newest finished
+run of that combination by its `metrics.json` timestamp (`inputs` defaults to the original
+family, `output_param` to `constrained`, any seed; `_superseded/` is ignored), or by path with
+`load_run(run_dir)`; `load_latest(...)` combines both. `load_run` applies the same wrapper
+check as `evaluate.py`, taking the wrapper fields from `metrics.json` when `history.json` of an
+older run lacks them.
+
+- `scripts/predict.py <benchmark | run_dir> --inputs … [--mode physics] [--output-param constrained]
+  [--family …] [--seed …] [--resolution 128 | 64x64x32] [--name …]`; `--show-ranges` prints the
+  trained ranges, `--no-save` only prints the result.
 - `notebooks/explore.ipynb` does the same interactively with inline plots, e.g. in VS Code
   over SSH (needs `ipykernel`: `pip install -e ".[notebook]"`).
 

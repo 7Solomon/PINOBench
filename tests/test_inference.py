@@ -13,7 +13,7 @@ import torch
 from omegaconf import OmegaConf
 
 from pino.evaluation import IncompatibleRunError, evaluate_model
-from pino.inference import as_inputs, extrapolation_messages, load_run, predict_one, save_prediction
+from pino.inference import as_inputs, extrapolation_messages, find_run, load_latest, load_run, predict_one, save_prediction
 from pino.models.factory import build_model
 from pino.problems import build_problem
 from pino.visualization import plot_prediction
@@ -132,3 +132,65 @@ def test_predict_script(tmp_path):
     assert ranges.returncode == 0 and "[4]" in ranges.stdout
     wrong = _predict_script(str(tmp_path), "--inputs", "1,2", "--no-save")
     assert wrong.returncode != 0 and "expects 5 input values" in wrong.stderr
+
+
+def _metrics(run_dir: Path, **fields) -> None:
+    metrics = {"benchmark": "heat_1d", "mode": "data", "seed": 0, "timestamp": "2026-01-01T00:00:00",
+               "wrapper_version": "2", "inputs": "sine", "output_param": "constrained", **fields}
+    (run_dir / "metrics.json").write_text(json.dumps(metrics))
+
+
+def test_find_run_takes_the_newest_finished_run_of_a_combination(tmp_path):
+    base = tmp_path / "outputs" / "heat_1d"
+    for name, fields in {
+        "sine-constrained/data/a": {"timestamp": "2026-01-01T00:00:00"},
+        "sine-constrained/data/b": {"timestamp": "2026-03-01T00:00:00", "seed": 1},
+        "sine-constrained/data/c": {"timestamp": "2026-02-01T00:00:00"},
+        "sine-soft/data/d": {"timestamp": "2026-04-01T00:00:00", "output_param": "soft"},
+    }.items():
+        make_run(base / name, "heat_1d", 16)
+        _metrics(base / name, **fields)
+    # Newer, but superseded or without checkpoint: ignored.
+    make_run(tmp_path / "outputs" / "_superseded" / "x" / "heat_1d" / "sine-constrained" / "data" / "e", "heat_1d", 16)
+    unfinished = base / "sine-constrained" / "data" / "f"
+    make_run(unfinished, "heat_1d", 16)
+    _metrics(unfinished, timestamp="2027-01-01T00:00:00")
+    (unfinished / "best_model.pt").unlink()
+
+    outputs = tmp_path / "outputs"
+    assert find_run("heat_1d", "data", outputs=outputs) == base / "sine-constrained" / "data" / "b"
+    assert find_run("heat_1d", "data", seed=0, outputs=outputs) == base / "sine-constrained" / "data" / "c"
+    assert find_run("heat_1d", "data", "soft", outputs=outputs) == base / "sine-soft" / "data" / "d"
+    assert load_latest("heat_1d", "data", outputs=outputs, device="cpu").run_dir == base / "sine-constrained" / "data" / "b"
+    with pytest.raises(FileNotFoundError, match="sine/soft data seed 0"):
+        find_run("heat_1d", "physics", outputs=outputs)
+
+
+def test_wrapper_fields_from_metrics_when_the_history_lacks_them(tmp_path):
+    """Older runs: history.json without wrapper fields, metrics.json completed after a re-check."""
+    make_run(tmp_path, "heat_1d", 16)
+    history = json.loads((tmp_path / "history.json").read_text())
+    for key in ("wrapper_version", "inputs", "output_param"):
+        del history[key]
+    (tmp_path / "history.json").write_text(json.dumps(history))
+    with pytest.raises(IncompatibleRunError, match="--allow-legacy"):
+        load_run(tmp_path, device="cpu")
+    _metrics(tmp_path)
+    load_run(tmp_path, device="cpu")
+    _metrics(tmp_path, wrapper_version="1")
+    with pytest.raises(IncompatibleRunError, match="wrapper_version: run '1'"):
+        load_run(tmp_path, device="cpu")
+
+
+def test_predict_script_with_a_benchmark_name(tmp_path):
+    run_dir = tmp_path / "outputs" / "heat_1d" / "sine-constrained" / "data" / "a"
+    make_run(run_dir, "heat_1d", 16)
+    _metrics(run_dir)
+    outputs = str(tmp_path / "outputs")
+    result = _predict_script("heat_1d", "--mode", "data", "--outputs", outputs, "--inputs", "1,0,0,0,0", "--no-save")
+    assert result.returncode == 0, result.stderr
+    assert f"run: {run_dir}" in result.stdout
+    missing = _predict_script("heat_1d", "--outputs", outputs, "--inputs", "1,0,0,0,0")
+    assert missing.returncode != 0 and "No finished run for heat_1d sine/constrained physics" in missing.stderr
+    unknown = _predict_script("heat_9d", "--outputs", outputs)
+    assert unknown.returncode != 0 and "Unknown problem" in unknown.stderr

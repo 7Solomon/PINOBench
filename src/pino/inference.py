@@ -2,7 +2,8 @@
 
 Typical use, in a script or a notebook::
 
-    run = load_run("outputs/heat_1d/sine-constrained/physics/<timestamp>")
+    run = load_latest("heat_1d", mode="physics")  # newest run, default inputs, constrained
+    run = load_run("outputs/heat_1d/sine-constrained/physics/<timestamp>")  # a specific run
     prediction = predict_one(run, [1.0, 0.0, 0.5, 0.0, 0.0], resolution=128)
     save_prediction(run, prediction, "half_and_third_mode")
 
@@ -36,12 +37,52 @@ from pino.evaluation import (
 from pino.losses import overridden_keys, resolve_loss_weights, resolve_training_settings
 from pino.models.factory import build_model
 from pino.numerics.grids import resolution_key
-from pino.problems import build_problem
+from pino.problems import build_problem, problem_class
 from pino.problems.base import Problem
 from pino.trainer import CHECKPOINT, HISTORY, select_device
 
 #: Subdirectory of a run that holds the saved predictions.
 PREDICTIONS = "predictions"
+#: Runs below this directory are ignored by :func:`find_run`, as by ``summarize.py``.
+SUPERSEDED = "_superseded"
+
+
+def find_run(
+    benchmark: str,
+    mode: str = "physics",
+    output_param: str = "constrained",
+    inputs: str | None = None,
+    seed: int | None = None,
+    outputs: str | Path = "outputs",
+) -> Path:
+    """Return the newest finished run of a combination, by the ``metrics.json`` timestamp.
+
+    ``inputs`` defaults to the benchmark's original input family; ``seed`` None takes any
+    seed. Only runs with ``metrics.json`` and ``best_model.pt`` count; runs below
+    ``_superseded/`` are ignored. Raises ``FileNotFoundError`` listing what exists instead.
+    """
+    inputs = inputs or problem_class(benchmark).default_inputs()
+    outputs = Path(outputs)
+    candidates, available = [], set()
+    for path in (outputs / benchmark).glob("*/*/*/metrics.json"):
+        if SUPERSEDED in path.relative_to(outputs).parts or not (path.parent / CHECKPOINT).exists():
+            continue
+        metrics = json.loads(path.read_text())
+        key = (metrics.get("inputs", inputs), metrics.get("output_param", "constrained"), metrics["mode"])
+        available.add(f"{key[0]}/{key[1]} {key[2]} seed {metrics['seed']}")
+        if key == (inputs, output_param, mode) and (seed is None or int(metrics["seed"]) == seed):
+            candidates.append((metrics["timestamp"], path.parent))
+    if not candidates:
+        wanted = f"{benchmark} {inputs}/{output_param} {mode}" + ("" if seed is None else f" seed {seed}")
+        listing = "\n  ".join(sorted(available)) or "(none)"
+        raise FileNotFoundError(f"No finished run for {wanted} under {outputs}. Available:\n  {listing}")
+    return max(candidates)[1]
+
+
+def load_latest(benchmark: str, mode: str = "physics", output_param: str = "constrained", inputs: str | None = None,
+                seed: int | None = None, outputs: str | Path = "outputs", device: str = "auto") -> "LoadedRun":
+    """:func:`load_run` of :func:`find_run`."""
+    return load_run(find_run(benchmark, mode, output_param, inputs, seed, outputs), device)
 
 
 @dataclass
@@ -64,7 +105,9 @@ def load_run(run_dir: str | Path, device: str = "auto", allow_legacy: bool = Fal
     """Rebuild problem, model and resolved config of ``run_dir`` and load the best checkpoint.
 
     Refuses runs whose output wrapper differs from the current code (see
-    :func:`pino.evaluation.check_run_compatibility`); runs without ``wrapper_version`` need
+    :func:`pino.evaluation.check_run_compatibility`). The wrapper fields are taken from
+    ``history.json``, or from ``metrics.json`` where only that carries them (older runs whose
+    metrics were re-evaluated and completed); runs without them anywhere need
     ``allow_legacy``. Loss weights and the problem's training block are resolved as in
     ``train.py``.
     """
@@ -72,7 +115,13 @@ def load_run(run_dir: str | Path, device: str = "auto", allow_legacy: bool = Fal
     cfg = OmegaConf.load(run_dir / ".hydra" / "config.yaml")
     history = json.loads((run_dir / HISTORY).read_text())
     problem = build_problem(cfg.problem)
-    check_run_compatibility(history, problem, allow_legacy)
+    stored = history
+    metrics_path = run_dir / "metrics.json"
+    if "wrapper_version" not in history and metrics_path.exists():
+        metrics = json.loads(metrics_path.read_text())
+        if "wrapper_version" in metrics:
+            stored = metrics
+    check_run_compatibility(stored, problem, allow_legacy)
     overrides = overridden_keys(OmegaConf.load(run_dir / ".hydra" / "overrides.yaml"))
     with open_dict(cfg):
         cfg.training.weights = OmegaConf.create(resolve_loss_weights(cfg.training, cfg.problem, overrides))
@@ -205,6 +254,8 @@ __all__ = [
     "Prediction",
     "as_inputs",
     "extrapolation_messages",
+    "find_run",
+    "load_latest",
     "load_run",
     "predict_one",
     "save_prediction",
