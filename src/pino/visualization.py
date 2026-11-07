@@ -46,9 +46,13 @@ def run_title(problem: Problem, mode: str, rel_l2: float) -> str:
     return f"{problem.name} · {mode} · rel. L2{variable} = {100 * rel_l2:.2f} %"
 
 
-def _save(fig, path: Path) -> None:
+def _save(fig, path: Path | None):
+    """Write and close ``fig``; without ``path`` return it instead (for notebooks)."""
+    if path is None:
+        return fig
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
+    return None
 
 
 def _percent_axis(ax) -> None:
@@ -115,7 +119,7 @@ def plot_training(history: dict, title: str, path: Path) -> None:
     ax_error.legend()
 
     fig.suptitle(title)
-    _save(fig, path)
+    return _save(fig, path)
 
 
 def plot_error_histogram(errors: np.ndarray, title: str, path: Path) -> None:
@@ -162,12 +166,14 @@ def plot_resolution(
 
 
 def _representative_examples(errors: np.ndarray) -> list[tuple[str, int]]:
-    """Return the indices of the best, median and worst example."""
+    """Return the indices of the best, median and worst example; a single example stands alone."""
+    if len(errors) == 1:
+        return [("Beispiel", 0)]
     order = np.argsort(errors)
     return [("Bestes", order[0]), ("Median", order[len(order) // 2]), ("Schlechtestes", order[-1])]
 
 
-def plot_solution_1d_t(problem: Problem, result: EvaluationResult, title: str, path: Path) -> None:
+def plot_solution_1d_t(problem: Problem, result: EvaluationResult, title: str, path: Path | None):
     """Heatmaps over ``(x, t)`` and profiles at three times, one row per representative example."""
     x_name, t_name = problem.variable_names["coordinates"]
     u_name = problem.variable_names["solution"][0]
@@ -175,11 +181,13 @@ def plot_solution_1d_t(problem: Problem, result: EvaluationResult, title: str, p
     t = problem.to_physical(t_name, result.dataset.grid[1, 0, :].numpy())
     extent = (x[0], x[-1], t[0], t[-1])
     errors = result.main_errors.numpy()
+    examples = _representative_examples(errors)
 
     fig, axes = plt.subplots(
-        3, 4, figsize=(14, 8.4), constrained_layout=True, gridspec_kw={"width_ratios": [1, 1, 1, 1.15]}
+        len(examples), 4, figsize=(14, 2.8 * len(examples)), constrained_layout=True, squeeze=False,
+        gridspec_kw={"width_ratios": [1, 1, 1, 1.15]},
     )
-    for row, (label, index) in zip(axes, _representative_examples(errors)):
+    for row, (label, index) in zip(axes, examples):
         exact = problem.to_physical(u_name, result.dataset.targets[index, 0].numpy())
         predicted = problem.to_physical(u_name, result.predictions[index, 0].numpy())
         error = np.abs(exact - predicted)
@@ -211,10 +219,10 @@ def plot_solution_1d_t(problem: Problem, result: EvaluationResult, title: str, p
         profile_axis.legend(fontsize=7)
 
     fig.suptitle(title)
-    _save(fig, path)
+    return _save(fig, path)
 
 
-def plot_solution_1d(problem: Problem, result: EvaluationResult, title: str, path: Path) -> None:
+def plot_solution_1d(problem: Problem, result: EvaluationResult, title: str, path: Path | None):
     """Profiles of every output variable for the best, median and worst example.
 
     Each example gets two rows: analytical (solid) against FNO (dashed), and below it the
@@ -224,17 +232,18 @@ def plot_solution_1d(problem: Problem, result: EvaluationResult, title: str, pat
     names = problem.variable_names["solution"]
     x = problem.to_physical(x_name, result.dataset.grid[0].numpy())
     main_errors = result.main_errors.numpy()
+    examples = _representative_examples(main_errors)
 
     fig, axes = plt.subplots(
-        6,
+        2 * len(examples),
         len(names),
-        figsize=(4.6 * len(names), 10.5),
+        figsize=(4.6 * len(names), 3.5 * len(examples)),
         constrained_layout=True,
         squeeze=False,
         sharex=True,
-        gridspec_kw={"height_ratios": [2, 1] * 3},
+        gridspec_kw={"height_ratios": [2, 1] * len(examples)},
     )
-    for block, (label, index) in enumerate(_representative_examples(main_errors)):
+    for block, (label, index) in enumerate(examples):
         for channel, name in enumerate(names):
             solution_axis, error_axis = axes[2 * block, channel], axes[2 * block + 1, channel]
             exact = problem.to_physical(name, result.dataset.targets[index, channel].numpy())
@@ -251,10 +260,10 @@ def plot_solution_1d(problem: Problem, result: EvaluationResult, title: str, pat
     for axis in axes[-1]:
         axis.set_xlabel(problem.label(x_name))
     fig.suptitle(title)
-    _save(fig, path)
+    return _save(fig, path)
 
 
-def plot_solution_2d(problem: Problem, result: EvaluationResult, title: str, path: Path) -> None:
+def plot_solution_2d(problem: Problem, result: EvaluationResult, title: str, path: Path | None):
     """Fields over ``(x, y)`` for the best, median and worst example, one row each.
 
     Panels: analytical and FNO with a shared ``viridis`` scale, the absolute error with its
@@ -267,11 +276,13 @@ def plot_solution_2d(problem: Problem, result: EvaluationResult, title: str, pat
     cut = int(np.argmin(np.abs(result.dataset.grid[1, 0, :].numpy() - 0.5)))
     extent = (x[0], x[-1], y[0], y[-1])
     errors = result.main_errors.numpy()
+    examples = _representative_examples(errors)
 
     fig, axes = plt.subplots(
-        3, 4, figsize=(14, 9.6), constrained_layout=True, gridspec_kw={"width_ratios": [1, 1, 1, 1.15]}
+        len(examples), 4, figsize=(14, 3.2 * len(examples)), constrained_layout=True, squeeze=False,
+        gridspec_kw={"width_ratios": [1, 1, 1, 1.15]},
     )
-    for row, (label, index) in zip(axes, _representative_examples(errors)):
+    for row, (label, index) in zip(axes, examples):
         exact = problem.to_physical(u_name, result.dataset.targets[index, 0].numpy())
         predicted = problem.to_physical(u_name, result.predictions[index, 0].numpy())
         error = np.abs(exact - predicted)
@@ -302,15 +313,16 @@ def plot_solution_2d(problem: Problem, result: EvaluationResult, title: str, pat
         profile_axis.legend(fontsize=7)
 
     fig.suptitle(title)
-    _save(fig, path)
+    return _save(fig, path)
 
 
-def plot_solution_2d_t(problem: Problem, result: EvaluationResult, title: str, path: Path) -> None:
+def plot_solution_2d_t(problem: Problem, result: EvaluationResult, title: str, path: Path | None):
     """One figure per representative example: ``solution_best.png``, ``_median`` and ``_worst``.
 
     The files are written next to ``path``. Each figure is a 3 x 3 grid: rows analytical, FNO and
     the absolute error, columns the first, middle and last time. Analytical and FNO share one
-    ``viridis`` scale over all three times, the error has its own ``magma`` scale.
+    ``viridis`` scale over all three times, the error has its own ``magma`` scale. A result with a
+    single example gives one figure at ``path`` itself (returned when ``path`` is None).
     """
     x_name, y_name, t_name = problem.variable_names["coordinates"]
     u_name = problem.variable_names["solution"][0]
@@ -323,7 +335,8 @@ def plot_solution_2d_t(problem: Problem, result: EvaluationResult, title: str, p
     errors = result.main_errors.numpy()
     channel = problem.main_channel
 
-    for (label, index), tag in zip(_representative_examples(errors), ("best", "median", "worst")):
+    examples = _representative_examples(errors)
+    for (label, index), tag in zip(examples, ("best", "median", "worst")):
         exact = problem.to_physical(u_name, result.dataset.targets[index, channel].numpy())
         predicted = problem.to_physical(u_name, result.predictions[index, channel].numpy())
         error = np.abs(exact - predicted)
@@ -343,6 +356,8 @@ def plot_solution_2d_t(problem: Problem, result: EvaluationResult, title: str, p
             unit = problem.label(u_name) if name != "|Fehler|" else f"|Fehler| {problem.label(u_name)}"
             fig.colorbar(image, ax=row_axes, label=unit, shrink=0.9)
         fig.suptitle(f"{title}\n{label} (rel. L2 = {100 * errors[index]:.2f} %)")
+        if len(examples) == 1:
+            return _save(fig, path)
         _save(fig, Path(path).with_name(f"solution_{tag}.png"))
 
 
@@ -355,11 +370,24 @@ SOLUTION_PLOTTERS: dict[str, Callable[[Problem, EvaluationResult, str, Path], No
 }
 
 
-def plot_solution(problem: Problem, result: EvaluationResult, title: str, path: Path) -> None:
-    """Dispatch the solution plot on ``problem.plot_type``."""
+def plot_solution(problem: Problem, result: EvaluationResult, title: str, path: Path | None):
+    """Dispatch the solution plot on ``problem.plot_type``; returns the figure if ``path`` is None."""
     if problem.plot_type not in SOLUTION_PLOTTERS:
         raise NotImplementedError(f"No solution plot for plot_type '{problem.plot_type}'.")
-    SOLUTION_PLOTTERS[problem.plot_type](problem, result, title, path)
+    return SOLUTION_PLOTTERS[problem.plot_type](problem, result, title, path)
+
+
+def plot_prediction(problem: Problem, prediction, mode: str, path: Path | None = None):
+    """Solution plot of a single :class:`pino.inference.Prediction`.
+
+    Without ``path`` the figure is returned, e.g. to show it inline in a notebook. The title
+    marks inputs outside the trained range.
+    """
+    title = run_title(problem, mode, prediction.rel_l2[problem.main_variable])
+    title += f" · Auflösung {prediction.resolution}"
+    if prediction.extrapolation:
+        title += " · EXTRAPOLATION"
+    return plot_solution(problem, prediction.as_result(problem), title, path)
 
 
 def plot_run(problem: Problem, result: EvaluationResult, history: dict, mode: str, train_resolution: int, run_dir) -> None:

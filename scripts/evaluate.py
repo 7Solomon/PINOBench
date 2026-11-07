@@ -13,15 +13,11 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-import torch
-from omegaconf import OmegaConf, open_dict
-
-from pino.evaluation import IncompatibleRunError, check_run_compatibility, evaluate_model, write_metrics
-from pino.losses import overridden_keys, resolve_loss_weights, resolve_training_settings
+from pino.evaluation import evaluate_model, write_metrics
+from pino.inference import IncompatibleRunError, load_run
+from pino.models.factory import count_parameters
 from pino.numerics.grids import resolution_key
-from pino.models.factory import build_model, count_parameters
-from pino.problems import build_problem
-from pino.trainer import select_device, set_seed
+from pino.trainer import set_seed
 from pino.visualization import plot_run
 
 
@@ -36,23 +32,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    cfg = OmegaConf.load(args.run_dir / ".hydra" / "config.yaml")
-    history = json.loads((args.run_dir / "history.json").read_text())
-    set_seed(int(cfg.seed))
-    device = select_device(args.device)
-
-    problem = build_problem(cfg.problem)
     try:
-        check_run_compatibility(history, problem, args.allow_legacy)
+        run = load_run(args.run_dir, args.device, args.allow_legacy)
     except IncompatibleRunError as error:
         raise SystemExit(f"Refusing to evaluate {args.run_dir}: {error}") from None
-    overrides = overridden_keys(OmegaConf.load(args.run_dir / ".hydra" / "overrides.yaml"))
-    with open_dict(cfg):
-        cfg.training.weights = OmegaConf.create(resolve_loss_weights(cfg.training, cfg.problem, overrides))
-        cfg.training.update(resolve_training_settings(cfg.training, cfg.problem, overrides))
-    model = build_model(cfg.model, problem, cfg.problem.train_resolution).to(device)
-    state = torch.load(args.run_dir / "best_model.pt", map_location=device, weights_only=False)
-    model.load_state_dict(state)
+    cfg, problem, model, device, history = run.cfg, run.problem, run.model, run.device, run.history
+    set_seed(int(cfg.seed))
 
     result = evaluate_model(model, problem, cfg, device)
     metrics = write_metrics(

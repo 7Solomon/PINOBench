@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+notebook = ["ipykernel"]  # notebooks/explore.ipynb in VS Code or Jupyter
 
 [tool.setuptools.packages.find]
 where = ["src"]

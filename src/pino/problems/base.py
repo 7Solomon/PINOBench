@@ -197,6 +197,16 @@ class Problem(ABC):
         """
         return None
 
+    def input_ranges(self, n: int = 20000) -> tuple[Tensor, Tensor]:
+        """Lower and upper bound of every operator input, each shaped like one input.
+
+        The default takes the minimum and maximum of ``n`` samples of :meth:`sample_inputs`,
+        which is exact up to a tiny margin for the uniform families of all benchmarks. It is
+        used to flag extrapolation when a model is evaluated on hand-made inputs.
+        """
+        sample = self.sample_inputs(n, torch.Generator().manual_seed(0))
+        return sample.amin(dim=0), sample.amax(dim=0)
+
     def to_physical(self, variable: str, values):
         """Convert a variable from model units to physical units."""
         return values * self.scales[variable]

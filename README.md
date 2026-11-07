@@ -38,7 +38,31 @@ python scripts/evaluate.py <run_dir> --allow-legacy  # runs without wrapper_vers
 
 # collect all runs under outputs/
 python scripts/summarize.py
+
+# evaluate a trained model on one hand-made input (see "Exploring a trained model")
+python scripts/predict.py outputs/heat_1d/sine-constrained/physics/<timestamp> --inputs 1,0,0.5,0,0 --name half_mode
 ```
+
+### Exploring a trained model
+
+`pino.inference` loads a finished run (`load_run`, with the same wrapper check as
+`evaluate.py`) and evaluates its model on one hand-made operator input (`predict_one`):
+prediction, analytical solution, rel. L2 and boundary error per variable, on the test grid or
+any other resolution. Inputs are given in the problem's own parametrization, the layout of
+`sample_inputs` for one example (heat_1d: b₁…b₅; chloride_1d: Cs, D; darcy_poisson_2d: the
+4 × 4 coefficients, flattened). Inputs outside the trained range (`Problem.input_ranges()`,
+by default the extremes of 20 000 samples, with 1 % tolerance) are evaluated as well but
+flagged as extrapolation. Only the operator inputs can be varied: heat_1d, for example, has
+no boundary values among its inputs.
+
+- `scripts/predict.py <run_dir> --inputs … [--resolution 128 | 64x64x32] [--name …]`;
+  `--show-ranges` prints the trained ranges, `--no-save` only prints the result.
+- `notebooks/explore.ipynb` does the same interactively with inline plots, e.g. in VS Code
+  over SSH (needs `ipykernel`: `pip install -e ".[notebook]"`).
+
+Saved predictions go to `<run_dir>/predictions/<name>/` (`inputs.json`, `result.json`,
+`prediction.pt`, `solution.png`), next to the model they come from. `summarize.py` only
+collects `metrics.json` and ignores them.
 
 Each run writes to `outputs/<benchmark>/<inputs>-<output_param>/<mode>/<timestamp>/`:
 
