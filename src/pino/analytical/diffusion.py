@@ -70,3 +70,30 @@ def crank_erfc(surface: Tensor, diffusivity: Tensor, x: Tensor, t: Tensor, initi
     surface = surface.reshape(-1, *extra)
     diffusivity = diffusivity.reshape(-1, *extra)
     return initial + (surface - initial) * torch.erfc(x / (2.0 * torch.sqrt(diffusivity * t)))
+
+
+def heat_sine_series_2d(coefficients: Tensor, x: Tensor, y: Tensor, t: Tensor, diffusivity: float) -> Tensor:
+    """Evaluate ``T = sum_{m,n} b_mn sin(m pi x) sin(n pi y) exp(-a pi^2 (m^2 + n^2) t)``.
+
+    This solves ``dT/dt = a (d2T/dx2 + d2T/dy2)`` on ``[0, 1]^2`` with ``T = 0`` on the boundary
+    and the initial field ``T0 = sum b_mn sin(m pi x) sin(n pi y)``.
+
+    Args:
+        coefficients: ``b_mn`` of shape ``(B, M, N)``, ``m`` along dimension 1.
+        x, y, t: Evaluation points, all of the same shape ``S``.
+        diffusivity: Diffusion coefficient ``a``.
+
+    Returns:
+        Values of shape ``(B, *S)``.
+    """
+    km, kn = _wavenumbers(coefficients.transpose(-1, -2)), _wavenumbers(coefficients)
+    # Evaluation points get two trailing mode dimensions: S -> (*S, M, N).
+    x, y, t = (v[..., None, None] for v in (x, y, t))
+    modes = (
+        torch.sin(x * km[:, None])
+        * torch.sin(y * kn[None, :])
+        * torch.exp(-diffusivity * (km[:, None] ** 2 + kn[None, :] ** 2) * t)
+    )
+    # (B, M, N) contracted with (*S, M, N) -> (B, *S).
+    return torch.tensordot(coefficients, modes, dims=([-2, -1], [-2, -1]))
+

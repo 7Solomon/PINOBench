@@ -8,8 +8,8 @@ from collections.abc import Sequence
 import torch
 from torch import Tensor
 
-from pino.analytical.diffusion import heat_sine_series, sine_series
-from pino.numerics.constraints import dirichlet_1d_t
+from pino.analytical.diffusion import heat_sine_series, heat_sine_series_2d, sine_series
+from pino.numerics.constraints import dirichlet_1d_t, dirichlet_2d_t
 from pino.numerics.grids import as_resolution, uniform_grid
 from pino.pdes.diffusion import diffusion_residual
 from pino.problems.base import Problem
@@ -85,3 +85,78 @@ class Heat1D(Problem):
     @staticmethod
     def _initial_profile(inputs: Tensor, x: Tensor) -> Tensor:
         return sine_series(inputs, x).unsqueeze(1)
+
+
+@register_problem("heat_2d")
+class Heat2D(Problem):
+    """Heat equation ``dT/dt = a (d2T/dx2 + d2T/dy2)`` on ``[0, 1]^2`` with ``T = 0`` on the boundary.
+
+    The operator maps ``T0(x, y) = sum_{m,n=1..M} b_mn sin(m pi x) sin(n pi y)`` to ``T(x, y, t)``.
+    Operator inputs are the coefficients ``b_mn`` with shape ``(B, M, M)``. The grid has shape
+    ``(3, Nx, Ny, Nt)`` with time last. The network sees ``T0`` (broadcast over ``t``), ``x``,
+    ``y`` and ``t / t_end``.
+
+    Reference values as in heat_1d: ``x = x_hat L``, ``T = T_hat dT``; time stays
+    non-dimensional, ``t_hat = a t / L^2``.
+    """
+
+    WRAPPER_VERSION = "1"
+    SUPPORTED_INPUTS = ("sine",)  # T0 = double sine series
+
+    n_dims = 3
+    in_channels = 4  # T0(x, y), x, y, t / t_end
+    out_channels = 1
+    plot_type = "2d_t"
+    variable_names = {"coordinates": ["x", "y", "t"], "solution": ["T"]}
+
+    def __init__(self, cfg) -> None:
+        self.a = float(cfg.a)
+        self.t_end = float(cfg.t_end)
+        self.n_series = int(cfg.n_series)
+        self.coeff_range = (float(cfg.coeff_low), float(cfg.coeff_high))
+        # Largest decay rate in the solution, the fastest mode's a pi^2 (M^2 + M^2).
+        self.residual_scale = self.a * math.pi**2 * 2 * self.n_series**2
+        length, delta = float(cfg.length), float(cfg.temperature_difference)
+        self.scales = {"x": length, "y": length, "t": 1.0, "T": delta}
+        self.units = {"x": "m", "y": "m", "t": "-", "T": "K"}
+
+    def grid(self, resolution: int | Sequence[int]) -> Tensor:
+        bounds = [(0.0, 1.0), (0.0, 1.0), (0.0, self.t_end)]
+        return uniform_grid(bounds, as_resolution(resolution, self.n_dims))
+
+    def sample_inputs(self, n: int, generator: torch.Generator) -> Tensor:
+        low, high = self.coeff_range
+        return low + (high - low) * torch.rand(n, self.n_series, self.n_series, generator=generator)
+
+    def analytical(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        return heat_sine_series_2d(inputs, grid[0], grid[1], grid[2], self.a).unsqueeze(1)
+
+    def residual(self, u: Tensor, inputs: Tensor, grid: Tensor) -> Tensor:
+        """Return ``(dT/dt - a Laplace T) / (a pi^2 2 M^2)`` on the interior points.
+
+        As in heat_1d: a mode ``(m, n)`` with amplitude ``b_mn`` produces terms of size
+        ``a pi^2 (m^2 + n^2) b_mn``; dividing by the fastest rate ``a pi^2 2 M^2`` (178 for
+        ``M = 3``) keeps its residual at the order of its amplitude.
+        """
+        return diffusion_residual(u, grid, self.a) / self.residual_scale
+
+    def boundary(self, inputs: Tensor, grid: Tensor) -> tuple[Tensor, Tensor]:
+        """``dirichlet_2d_t`` with ``u0 = T0`` and zero edges: ``g = T0``, ``phi = tau x(1-x) y(1-y)``."""
+        x, y, t = grid[0, :, 0, 0], grid[1, 0, :, 0], grid[2, 0, 0, :]
+        initial = self._initial_field(inputs, grid[0, ..., 0], grid[1, ..., 0])
+        # sin(m pi) is only zero up to rounding, the Dirichlet value itself is exactly zero.
+        initial[..., [0, -1], :] = 0.0
+        initial[..., :, [0, -1]] = 0.0
+        batch = inputs.shape[0]
+        edge_x, edge_y = inputs.new_zeros(batch, 1, x.shape[0], t.shape[0]), inputs.new_zeros(batch, 1, y.shape[0], t.shape[0])
+        return dirichlet_2d_t(x, y, t, initial, edge_x, edge_x, edge_y, edge_y)
+
+    def to_fno_input(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        batch = inputs.shape[0]
+        initial = self._initial_field(inputs, grid[0, ..., 0], grid[1, ..., 0])[..., None].expand(-1, -1, *grid.shape[1:])
+        coordinates = torch.stack([grid[0], grid[1], grid[2] / self.t_end]).expand(batch, -1, -1, -1, -1)
+        return torch.cat([initial, coordinates], dim=1)
+
+    def _initial_field(self, inputs: Tensor, x: Tensor, y: Tensor) -> Tensor:
+        """``T0`` on the space grid, ``(B, 1, Nx, Ny)``."""
+        return heat_sine_series_2d(inputs, x, y, torch.zeros_like(x), self.a).unsqueeze(1)

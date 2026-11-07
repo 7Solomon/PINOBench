@@ -1,0 +1,37 @@
+# dT/dt = a (d2T/dx2 + d2T/dy2) on [0, 1]^2, t in [0, t_end], T = 0 on the boundary
+# Operator input: T0(x, y) = sum_{m,n=1..M} b_mn sin(m pi x) sin(n pi y), b_mn ~ U(coeff_low, coeff_high)
+# Fastest decay rate a pi^2 (M^2 + M^2) = 178 for M = 3; it also normalizes the residual.
+name: heat_2d
+a: 1.0
+t_end: 0.05
+n_series: 3
+coeff_low: -1.0
+coeff_high: 1.0
+
+# Reference values as in heat_1d: x = x_hat L, T = T_hat dT; time non-dimensional (a t / L^2).
+length: 1.0                  # m
+temperature_difference: 1.0  # K
+
+# Variants (see README). Defaults reproduce the original benchmark.
+inputs: sine                 # sine
+output_param: constrained    # constrained | unscaled | direct (data mode only) | soft
+# Global output constant c for unscaled, direct and soft: RMS of T over 20 000 samples of
+# this input family on 64^3 points (0.340), rounded.
+output_scale_global: [0.34]
+
+# Grid (x, y, t), time last. Chosen from the memory and runtime test (README, "3D FNO"):
+# 32^3 with batch 8 takes ~56 ms per step on an A100, so 1000 examples x 200 epochs ~ 25 min.
+train_resolution: [32, 32, 32]
+test_resolution: [32, 32, 32]
+# Space and time scaled together.
+resolution_study: [[24, 24, 24], [32, 32, 32], [48, 48, 48], [64, 64, 64]]
+
+# Replaces the training config for these keys unless set on the command line (budget ~30 min).
+training:
+  epochs: 200
+  batch_size: 8
+
+# Weight of the boundary penalty L_bc (output_param=soft only): heat_1d's best weight from the
+# soft pilot (docs/SoftConstraintPilot.md), the most similar benchmark.
+loss_weights:
+  bc: 1.0

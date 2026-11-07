@@ -34,6 +34,7 @@ EXPECTED_INPUTS = {
     "darcy_layered_1d": ("two_layer",),
     "darcy_poisson_2d": ("sine",),
     "heat_1d": ("sine",),
+    "heat_2d": ("sine",),
     "richards_steady_1d": ("uniform",),
 }
 
