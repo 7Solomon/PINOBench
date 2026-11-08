@@ -13,7 +13,9 @@
    | `analytical(inputs, grid)` | exact solution `(B, C, *resolution)` |
    | `residual(u, inputs, grid)` | normalized PDE residual on the interior points |
    | `WRAPPER_VERSION` | string, increase it whenever `boundary()` or `output_scale()` change |
-   | `boundary(inputs, grid)` | `(g, φ)` for `u = g + φ·NN`, φ only the fixed shape part; use `numerics.constraints.dirichlet_1d`, `dirichlet_1d_t`, `dirichlet_2d` or `dirichlet_2d_t` |
+   | `boundary(inputs, grid)` | `(g, φ)` for `u = g + φ·NN`, φ only the fixed shape part; use `numerics.constraints.dirichlet_1d`, `dirichlet_1d_t`, `dirichlet_2d` or `dirichlet_2d_t`; φ may differ per channel, shape `(1, C, *resolution)`, then the `soft` mask does too |
+   | `neumann_conditions(inputs, grid)`, `neumann_fields(u, inputs, grid)`, `neumann_scale(inputs, grid)` | optional: conditions on stresses or fluxes for `L_neumann`, the fields they name, and the normalization per sample |
+   | `stress_fields(u, inputs, grid)`, `exact_stress_fields(inputs, grid)`, `mechanics_plots` | optional: stress metrics, with `mechanics_plots = True` also `deformation.png` and `stress.png` |
    | `to_fno_input(inputs, grid)` | network input `(B, in_channels, *resolution)` including coordinates |
    | `output_scale(inputs, grid)` | optional: per-sample scale s of the output, `constrained` only |
    | `data_scale(inputs, grid)` | optional: typical size of each output channel for the data loss |
@@ -27,7 +29,8 @@
    `train_resolution`, `test_resolution` and `resolution_study`, plus `inputs` (the first entry
    of `SUPPORTED_INPUTS`, it appears in the run directory),
    `output_param` and `output_scale_global` (see the README). Optional: `loss_weights` for
-   the `hybrid` mode and `bc` in every mode (`output_param: soft`); `training` for problems
+   the `hybrid` mode, `bc` in every mode (`output_param: soft`) and `neumann` in `physics` and
+   `hybrid`; `training` for problems
    that need their own `epochs`, `batch_size` and similar settings to stay within the time budget.
 4. **Tests** in `tests/`: PDE satisfied via autograd, boundaries exact, FD residual of the
    analytical solution small and convergent, shapes and hard constraint.
