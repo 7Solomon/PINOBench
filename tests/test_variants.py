@@ -34,7 +34,7 @@ EXPECTED_INPUTS = {
     "chloride_corner_2d": ("uniform",),
     "darcy_layered_1d": ("two_layer",),
     "darcy_poisson_2d": ("sine",),
-    "heat_1d": ("sine",),
+    "heat_1d": ("sine", "sine_ramp"),
     "heat_2d": ("sine",),
     "richards_steady_1d": ("uniform",),
 }

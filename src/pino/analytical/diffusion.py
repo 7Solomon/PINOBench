@@ -118,3 +118,57 @@ def chloride_corner(surface: Tensor, diffusivity: Tensor, x: Tensor, y: Tensor, 
     surface = surface.reshape(-1, *extra)
     width = 2.0 * torch.sqrt(diffusivity.reshape(-1, *extra) * t)
     return surface * (1.0 - torch.erf(x / width) * torch.erf(y / width))
+
+
+def heat_ramp_series(
+    coefficients: Tensor,
+    start_left: Tensor,
+    rate_left: Tensor,
+    start_right: Tensor,
+    rate_right: Tensor,
+    x: Tensor,
+    t: Tensor,
+    diffusivity: float,
+    n_modes: int = 200,
+) -> Tensor:
+    """Heat equation on ``x in [0, 1]`` with boundary values linear in time.
+
+    Solves ``dT/dt = a d2T/dx2`` with ``T(0, t) = alpha_L + beta_L t``, ``T(1, t) = alpha_R +
+    beta_R t`` and the compatible initial profile
+    ``T(x, 0) = (1 - x) alpha_L + x alpha_R + sum_n b_n sin(n pi x)``.
+
+    Lifting: ``T = (1 - x) T_L(t) + x T_R(t) + w`` with ``w = 0`` on the boundary and
+    ``dw/dt = a d2w/dx2 - [(1 - x) beta_L + x beta_R]``. The source has the sine coefficients
+    ``s_n = 2 / (n pi) [beta_L + (-1)^(n+1) beta_R]``, so with ``lambda_n = a (n pi)^2``
+
+        w_n(t) = b_n exp(-lambda_n t) - s_n (1 - exp(-lambda_n t)) / lambda_n.
+
+    The ramp part decays like ``1 / n^3``; truncating it after ``n_modes`` leaves an error of
+    about ``|beta| / (a pi^3 n_modes^2)``, 8e-6 for ``beta = 10``, ``a = 1`` and 200 modes.
+
+    Args:
+        coefficients: ``b_n`` of shape ``(B, N)``.
+        start_left, rate_left, start_right, rate_right: ``alpha_L``, ``beta_L``, ``alpha_R``,
+            ``beta_R``, each of shape ``(B,)``.
+        x, t: Evaluation points of the same shape ``S``.
+        diffusivity: Diffusion coefficient ``a > 0``.
+        n_modes: Number of modes of the ramp series.
+
+    Returns:
+        Values of shape ``(B, *S)``.
+    """
+    extra = (1,) * x.dim()
+    alpha_left, beta_left = start_left.reshape(-1, *extra), rate_left.reshape(-1, *extra)
+    alpha_right, beta_right = start_right.reshape(-1, *extra), rate_right.reshape(-1, *extra)
+    lifting = (1.0 - x) * (alpha_left + beta_left * t) + x * (alpha_right + beta_right * t)
+
+    n = torch.arange(1, n_modes + 1, dtype=x.dtype, device=x.device)
+    k = n * math.pi
+    rate = diffusivity * k**2
+    # 2 / (n pi) sin(n pi x) (1 - exp(-lambda t)) / lambda, with expm1 for small lambda t.
+    modes = (2.0 / k) * torch.sin(x.unsqueeze(-1) * k) * (-torch.expm1(-rate * t.unsqueeze(-1))) / rate
+    response_left = modes.sum(dim=-1)  # the source (1 - x) has s_n proportional to 1
+    response_right = (modes * (1.0 - 2.0 * (n.long() % 2 == 0).to(x.dtype))).sum(dim=-1)  # x: (-1)^(n+1)
+
+    series = heat_sine_series(coefficients, x, t, diffusivity)
+    return lifting + series - beta_left * response_left - beta_right * response_right
