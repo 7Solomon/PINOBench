@@ -25,7 +25,11 @@ output_param: constrained    # constrained | unscaled | direct (data mode only) 
 # 0.0257 and 0.218), rounded.
 output_scale_global: [0.45, 0.026, 0.22]
 
+# neumann: from the weight search in physics (docs/ThermoelasticBlock.md): v is level for 1 and 10, 10 halves
+# the error of u, 100 is worse in v.
+# bc: as for the other 2D benchmarks, only with output_param=soft.
 loss_weights:
+  neumann: 10.0
   bc: 1.0
 
 train_resolution: 64
