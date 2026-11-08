@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader
 
 from pino.data.dataset import build_dataset
 from pino.evaluation import predict, validate, validation_seed
-from pino.losses import compute_loss, uses_data
+from pino.losses import compute_loss, neumann_active, uses_data
 from pino.problems.base import Problem
 
 log = logging.getLogger(__name__)
@@ -47,17 +47,18 @@ def select_device(name: str = "auto") -> torch.device:
     return torch.device(name)
 
 
-def selection_criterion(mode: str, soft: bool = False) -> str:
+def selection_criterion(mode: str, soft: bool = False, neumann: bool = False) -> str:
     """Name of the validation quantity that selects the checkpoint in ``mode``.
 
     ``physics`` selects by the physics loss, so the analytical solution plays no role in that
     mode. With ``output_param = soft`` it selects by the full objective ``physics + w_bc L_bc``
     instead: the residual alone does not see the boundary values (a constant head has zero
-    residual in darcy_layered_1d). ``data`` and ``hybrid`` select by the mean relative L2 over
-    all output variables.
+    residual in darcy_layered_1d). The same holds with Neumann conditions, which may carry the
+    whole load: ``u = v = 0`` has zero residual in elastic_block_2d. ``data`` and ``hybrid`` select
+    by the mean relative L2 over all output variables.
     """
     if mode == "physics":
-        return "val_objective" if soft else "val_physics"
+        return "val_objective" if soft or neumann else "val_physics"
     return "val_rel_l2_all"
 
 
@@ -77,8 +78,10 @@ class TrainingResult:
     val_rel_l2_all: list[float] = field(default_factory=list)
     #: Mean validation rel. L2 per output variable. In ``physics`` mode for observation only.
     val_rel_l2: dict[str, list[float]] = field(default_factory=dict)
-    #: ``output_param = soft`` only: validation ``L_bc`` and ``val_physics + w_bc L_bc``.
+    #: Validation ``L_bc`` (``output_param = soft`` only) and ``L_neumann`` (Neumann conditions
+    #: only), and with either of them the objective ``val_physics + w_bc L_bc + w_n L_neumann``.
     val_bc: list[float] = field(default_factory=list)
+    val_neumann: list[float] = field(default_factory=list)
     val_objective: list[float] = field(default_factory=list)
     best_epoch: int = -1
     best_score: float = float("inf")
@@ -96,8 +99,10 @@ class TrainingResult:
             "val_physics": self.val_physics,
             "val_rel_l2_all": self.val_rel_l2_all,
             "val_rel_l2": self.val_rel_l2,
-            # Only written for soft runs, so the history of every other run is unchanged.
-            **({"val_bc": self.val_bc, "val_objective": self.val_objective} if self.val_bc else {}),
+            # Only written where they exist, so the history of every other run is unchanged.
+            **({"val_bc": self.val_bc} if self.val_bc else {}),
+            **({"val_neumann": self.val_neumann} if self.val_neumann else {}),
+            **({"val_objective": self.val_objective} if self.val_objective else {}),
             "best_epoch": self.best_epoch,
             "best_score": self.best_score,
             "training_time_s": self.training_time_s,
@@ -173,7 +178,8 @@ def train(
     names = problem.variable_names["solution"]
 
     result = TrainingResult(
-        selection=selection_criterion(training.mode, problem.soft_constraint), variant=problem.variant_metadata()
+        selection=selection_criterion(training.mode, problem.soft_constraint, neumann_active(problem, training.weights)),
+        variant=problem.variant_metadata(),
     )
     start = time.perf_counter()
     for epoch in range(1, epochs + 1):
@@ -198,9 +204,15 @@ def train(
             result.val_rel_l2_all.append(validation.errors.mean().item())
             for channel, name in enumerate(names):
                 result.val_rel_l2.setdefault(name, []).append(validation.errors[:, channel].mean().item())
+            objective = validation.physics
             if validation.bc is not None:
                 result.val_bc.append(validation.bc)
-                result.val_objective.append(validation.physics + float(training.weights["bc"]) * validation.bc)
+                objective += float(training.weights["bc"]) * validation.bc
+            if validation.neumann is not None:
+                result.val_neumann.append(validation.neumann)
+                objective += float(training.weights.get("neumann", 0.0)) * validation.neumann
+            if validation.bc is not None or validation.neumann is not None:
+                result.val_objective.append(objective)
             score = getattr(result, result.selection)[-1]
             improved = score < result.best_score
             if improved:

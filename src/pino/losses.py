@@ -1,7 +1,8 @@
 """Training losses: ``physics``, ``data`` and their weighted sum ``hybrid``.
 
 With ``output_param = soft`` every mode adds the boundary penalty ``L_bc`` with weight
-``weights.bc``.
+``weights.bc``. Problems with Neumann conditions add ``L_neumann`` with weight ``weights.neumann``
+(default 0 in ``data``).
 """
 
 from __future__ import annotations
@@ -52,12 +53,36 @@ def compute_loss(
         data = difference.pow(2).mean()
         total = total + float(weights.data) * data
         components["data"] = data.item()
+    if neumann_active(problem, weights):
+        neumann = neumann_loss(problem, prediction, inputs, grid)
+        total = total + float(weights["neumann"]) * neumann
+        components["neumann"] = neumann.item()
     if problem.soft_constraint:
         bc = boundary_loss(problem, prediction, inputs, grid)
         total = total + float(weights["bc"]) * bc
         components["bc"] = bc.item()
     components["total"] = total.item()
     return total, components
+
+
+def neumann_active(problem: Problem, weights) -> bool:
+    """``L_neumann`` counts for problems with Neumann conditions and a positive weight."""
+    return problem.has_neumann and float(weights.get("neumann", 0.0)) > 0.0
+
+
+def neumann_loss(problem: Problem, prediction: Tensor, inputs: Tensor, grid: Tensor) -> Tensor:
+    """``L_neumann = mean over the points of all conditions of ((q - target) / s)^2``.
+
+    ``s`` per sample comes from :meth:`Problem.neumann_scale`. Every boundary point of every
+    condition counts once.
+    """
+    fields = problem.neumann_fields(prediction, inputs, grid)
+    scale = problem.neumann_scale(inputs, grid)[:, None]
+    squares = [
+        ((condition.values(fields[condition.quantity]) - condition.target) / scale).pow(2).flatten()
+        for condition in problem.neumann_conditions(inputs, grid)
+    ]
+    return torch.cat(squares).mean()
 
 
 def boundary_loss(problem: Problem, prediction: Tensor, inputs: Tensor, grid: Tensor) -> Tensor:
@@ -112,7 +137,8 @@ def resolve_loss_weights(training_cfg, problem_cfg, overridden: Iterable[str] = 
 
     ``loss_weights`` sets ``physics`` and ``data`` only in the ``hybrid`` mode: in ``physics``
     and ``data`` these have a single term whose weight is fixed by the mode. ``bc`` (the
-    boundary penalty of ``output_param = soft``) is taken in every mode.
+    boundary penalty of ``output_param = soft``) is taken in every mode. ``neumann`` is taken in
+    ``physics`` and ``hybrid``; in ``data`` it stays 0 unless set on the command line.
     """
     overridden = set(overridden)
     weights = {name: float(value) for name, value in training_cfg.weights.items()}
@@ -121,6 +147,8 @@ def resolve_loss_weights(training_cfg, problem_cfg, overridden: Iterable[str] = 
         if name not in weights:
             raise KeyError(f"Unknown loss term '{name}' in loss_weights. Available: {sorted(weights)}")
         if name in MODE_TERMS and training_cfg.mode != "hybrid":
+            continue
+        if name == "neumann" and training_cfg.mode == "data":
             continue
         if "training.weights" not in overridden and f"training.weights.{name}" not in overridden:
             weights[name] = float(value)

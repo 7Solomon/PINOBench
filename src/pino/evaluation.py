@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import torch
 from torch import Tensor, nn
 
 from pino.data.dataset import OperatorDataset, build_dataset
-from pino.losses import boundary_loss
+from pino.losses import boundary_loss, neumann_loss
 from pino.numerics.constraints import apply_hard_constraint
 from pino.numerics.grids import resolution_key
 from pino.problems.base import Problem
@@ -42,6 +42,26 @@ def boundary_errors(problem: Problem, prediction: Tensor, target: Tensor, inputs
     return deviation / target.abs().flatten(2).amax(dim=-1)
 
 
+def neumann_errors(problem: Problem, prediction: Tensor, inputs: Tensor, grid: Tensor) -> Tensor:
+    """Per example and Neumann condition, ``(B, K)``: ``max |q - target|`` relative to the load size."""
+    fields = problem.neumann_fields(prediction, inputs, grid)
+    scale = problem.neumann_scale(inputs, grid)[:, None]
+    errors = [
+        ((condition.values(fields[condition.quantity]) - condition.target).abs() / scale).amax(dim=-1)
+        for condition in problem.neumann_conditions(inputs, grid)
+    ]
+    return torch.stack(errors, dim=1)
+
+
+def stress_errors(problem: Problem, prediction: Tensor, inputs: Tensor, grid: Tensor) -> dict[str, Tensor]:
+    """Rel. L2 of the finite-difference stresses against the analytical ones, each ``(B,)``."""
+    predicted = problem.stress_fields(prediction, inputs, grid)
+    if predicted is None:
+        return {}
+    exact = problem.exact_stress_fields(inputs, grid)
+    return {name: relative_l2(field[:, None], exact[name][:, None])[:, 0] for name, field in predicted.items()}
+
+
 def summarize_errors(errors: Tensor) -> dict[str, float]:
     return {
         "mean": errors.mean().item(),
@@ -59,11 +79,12 @@ def summarize_per_variable(problem: Problem, errors: Tensor) -> dict[str, dict[s
 def predict_dataset(
     model: nn.Module, problem: Problem, dataset: OperatorDataset, device: torch.device, batch_size: int = 32
 ) -> tuple[Tensor, Tensor]:
-    """Return all predictions, the rel. L2 ``(B, C)`` and the boundary errors ``(B, C)``, on the CPU."""
+    """Return all predictions, the rel. L2 ``(B, C)``, the boundary errors ``(B, C)`` and, where the
+    problem has them, Neumann errors ``(B, K)`` and stress errors (name -> ``(B,)``), on the CPU."""
     was_training = model.training
     model.eval()
     grid = dataset.grid.to(device)
-    predictions, errors, bc_errors = [], [], []
+    predictions, errors, bc_errors, neumann, stresses = [], [], [], [], {}
     for start in range(0, len(dataset), batch_size):
         inputs = dataset.inputs[start : start + batch_size].to(device)
         target = dataset.targets[start : start + batch_size].to(device)
@@ -71,8 +92,18 @@ def predict_dataset(
         predictions.append(prediction.cpu())
         errors.append(relative_l2(prediction, target).cpu())
         bc_errors.append(boundary_errors(problem, prediction, target, inputs, grid).cpu())
+        if problem.has_neumann:
+            neumann.append(neumann_errors(problem, prediction, inputs, grid).cpu())
+        for name, values in stress_errors(problem, prediction, inputs, grid).items():
+            stresses.setdefault(name, []).append(values.cpu())
     model.train(was_training)
-    return torch.cat(predictions), torch.cat(errors), torch.cat(bc_errors)
+    return (
+        torch.cat(predictions),
+        torch.cat(errors),
+        torch.cat(bc_errors),
+        torch.cat(neumann) if neumann else None,
+        {name: torch.cat(values) for name, values in stresses.items()},
+    )
 
 
 @dataclass
@@ -89,6 +120,11 @@ class EvaluationResult:
     main_variable: str
     #: Boundary error per example and output channel, ``(B, C)``, see :func:`boundary_errors`.
     bc_errors: Tensor | None = None
+    #: Neumann error per example and condition, ``(B, K)``, and the labels of the conditions.
+    neumann_errors: Tensor | None = None
+    neumann_labels: tuple[str, ...] = ()
+    #: Stress component -> rel. L2 per example of the finite-difference stresses.
+    stress_errors: dict[str, Tensor] = field(default_factory=dict)
 
     @property
     def main_errors(self) -> Tensor:
@@ -111,11 +147,13 @@ def validation_seed(seed: int) -> int:
 @dataclass
 class ValidationResult:
     """Errors against the analytical solution ``(B, C)``, the mean physics loss and, with
-    ``output_param = soft``, the mean boundary penalty ``L_bc``."""
+    ``output_param = soft``, the mean boundary penalty ``L_bc``; ``L_neumann`` for problems with
+    Neumann conditions."""
 
     errors: Tensor
     physics: float
     bc: float | None = None
+    neumann: float | None = None
 
 
 @torch.no_grad()
@@ -130,7 +168,7 @@ def validate(
     was_training = model.training
     model.eval()
     grid = dataset.grid.to(device)
-    errors, squared, count, bc_total = [], 0.0, 0, 0.0
+    errors, squared, count, bc_total, neumann_total = [], 0.0, 0, 0.0, 0.0
     for start in range(0, len(dataset), batch_size):
         inputs = dataset.inputs[start : start + batch_size].to(device)
         target = dataset.targets[start : start + batch_size].to(device)
@@ -140,10 +178,13 @@ def validate(
         count += residual.numel()
         if problem.soft_constraint:
             bc_total += boundary_loss(problem, prediction, inputs, grid).item() * inputs.shape[0]
+        if problem.has_neumann:
+            neumann_total += neumann_loss(problem, prediction, inputs, grid).item() * inputs.shape[0]
         errors.append(relative_l2(prediction, target).cpu())
     model.train(was_training)
     bc = bc_total / len(dataset) if problem.soft_constraint else None
-    return ValidationResult(torch.cat(errors), squared / count, bc)
+    neumann = neumann_total / len(dataset) if problem.has_neumann else None
+    return ValidationResult(torch.cat(errors), squared / count, bc, neumann)
 
 
 def evaluate_model(model: nn.Module, problem: Problem, cfg, device: torch.device) -> EvaluationResult:
@@ -152,15 +193,17 @@ def evaluate_model(model: nn.Module, problem: Problem, cfg, device: torch.device
     batch_size = int(cfg.training.batch_size)
     n_test = int(cfg.training.n_test)
     dataset = build_dataset(problem, n_test, cfg.problem.test_resolution, seed)
-    predictions, errors, bc_errors = predict_dataset(model, problem, dataset, device, batch_size)
+    predictions, errors, bc_errors, neumann, stresses = predict_dataset(model, problem, dataset, device, batch_size)
+    labels = tuple(c.label for c in problem.neumann_conditions(dataset.inputs[:1], dataset.grid))
 
     resolution_errors = {}
     for resolution in cfg.problem.resolution_study:
         study = build_dataset(problem, n_test, resolution, seed)
-        _, study_errors, _ = predict_dataset(model, problem, study, device, batch_size)
+        _, study_errors, *_ = predict_dataset(model, problem, study, device, batch_size)
         resolution_errors[resolution_key(resolution)] = summarize_per_variable(problem, study_errors)
     return EvaluationResult(
-        dataset, predictions, errors, problem.main_channel, resolution_errors, problem.main_variable, bc_errors
+        dataset, predictions, errors, problem.main_channel, resolution_errors, problem.main_variable, bc_errors,
+        neumann, labels, stresses,
     )
 
 
@@ -173,6 +216,18 @@ def boundary_error_summary(problem: Problem, bc_errors: Tensor | None) -> dict[s
         "bc_error_mean": {name: bc_errors[:, c].mean().item() for c, name in enumerate(names)},
         "bc_error_max": {name: bc_errors[:, c].max().item() for c, name in enumerate(names)},
     }
+
+
+def mechanics_summary(result: EvaluationResult) -> dict:
+    """``neumann_error_*`` per condition and ``rel_l2_stress`` per component, where they exist."""
+    summary: dict = {}
+    if result.neumann_errors is not None:
+        columns = list(zip(result.neumann_labels, result.neumann_errors.T))
+        summary["neumann_error_mean"] = {label: values.mean().item() for label, values in columns}
+        summary["neumann_error_max"] = {label: values.max().item() for label, values in columns}
+    if result.stress_errors:
+        summary["rel_l2_stress"] = {name: summarize_errors(values) for name, values in result.stress_errors.items()}
+    return summary
 
 
 class IncompatibleRunError(ValueError):
@@ -234,6 +289,7 @@ def write_metrics(
         "resolution_study": {str(k): v for k, v in result.main_resolution_errors().items()},
         "resolution_study_per_variable": {str(k): v for k, v in result.resolution_errors.items()},
         **boundary_error_summary(problem, result.bc_errors),
+        **mechanics_summary(result),
         "train_resolution": resolution_key(cfg.problem.train_resolution),
         "test_resolution": resolution_key(cfg.problem.test_resolution),
         "training_time_s": training_time_s,

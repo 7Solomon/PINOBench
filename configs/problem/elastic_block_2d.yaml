@@ -1,0 +1,35 @@
+# Elastic block in a frictionless box, loaded from above: plane stress, E = 1, on [0, 1] x [0, H].
+# Sliding supports: x = 0, 1: u = 0, sigma_xy = 0; y = 0: v = 0, sigma_xy = 0.
+# Top y = H: sigma_yy = -p(x), sigma_xy = 0, with p = p_0 + sum_{n=1..N} p_n cos(n pi x).
+name: elastic_block_2d
+n_series: 6
+mean_load_low: 0.5    # p_0
+mean_load_high: 1.0
+coeff_low: -0.5       # p_n ~ U(coeff_low, coeff_high) / n
+coeff_high: 0.5
+poisson_low: 0.15     # nu
+poisson_high: 0.35
+height: 1.0           # H / L
+
+# Reference values: x = x_hat L, sigma = sigma_hat p_ref, u = u_hat p_ref L / E
+# (2 m * 10 MPa / 30 GPa = 0.667 mm).
+length: 2.0             # m
+youngs_modulus_gpa: 30.0
+load_ref_mpa: 10.0
+
+# Variants (see README). Defaults reproduce the original benchmark.
+inputs: cosine               # cosine
+output_param: constrained    # constrained | unscaled | direct (data mode only) | soft
+# Global output constants c_u, c_v: RMS of u and v over 20 000 samples on 64 points (0.0189 and
+# 0.419), rounded. u is about 22 times smaller than v.
+output_scale_global: [0.019, 0.42]
+
+# neumann: from the weight search in physics (docs/ElasticBlock.md), 100 beat 1 and 10.
+# bc: as for the other 2D benchmarks, only with output_param=soft.
+loss_weights:
+  neumann: 100.0
+  bc: 1.0
+
+train_resolution: 64
+test_resolution: 64
+resolution_study: [32, 64, 128, 256]

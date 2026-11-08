@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+import torch
 from torch import Tensor
 
 from pino.numerics.grids import grid_spacing
@@ -76,3 +77,27 @@ def interior(u: Tensor, dims: Iterable[int]) -> Tensor:
     for dim in dims:
         u = u.narrow(dim, 1, u.shape[dim] - 2)
     return u
+
+
+def central_mixed(u: Tensor, h1: float, h2: float, dim1: int, dim2: int) -> Tensor:
+    """Mixed derivative ``d2u / (dx1 dx2)``, central of second order, on the interior of both dims."""
+    return central_d1(central_d1(u, h1, dim1), h2, dim2)
+
+
+def one_sided_d1(u: Tensor, h: float, dim: int, side: str) -> Tensor:
+    """First derivative of second order at one end of ``dim``; ``dim`` keeps length one.
+
+    ``side = "start"``: ``(-3 u[0] + 4 u[1] - u[2]) / (2 h)``,
+    ``side = "end"``: ``(3 u[-1] - 4 u[-2] + u[-3]) / (2 h)``.
+    """
+    n = u.shape[dim]
+    if side == "start":
+        return (-3.0 * u.narrow(dim, 0, 1) + 4.0 * u.narrow(dim, 1, 1) - u.narrow(dim, 2, 1)) / (2.0 * h)
+    if side == "end":
+        return (3.0 * u.narrow(dim, n - 1, 1) - 4.0 * u.narrow(dim, n - 2, 1) + u.narrow(dim, n - 3, 1)) / (2.0 * h)
+    raise ValueError(f"Unknown side '{side}', use 'start' or 'end'.")
+
+
+def gradient(u: Tensor, h: float, dim: int) -> Tensor:
+    """First derivative of second order on all points: central inside, one-sided at both ends."""
+    return torch.cat([one_sided_d1(u, h, dim, "start"), central_d1(u, h, dim), one_sided_d1(u, h, dim, "end")], dim=dim)

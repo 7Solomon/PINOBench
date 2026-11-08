@@ -95,11 +95,26 @@ are ignored.
 
 | Mode | Loss | Analytical solution |
 |---|---|---|
-| `physics` | mean square of the normalized PDE residual | evaluation only |
+| `physics` | mean square of the normalized PDE residual, plus `weights.neumann · L_neumann` for problems with stress or flux conditions | evaluation only |
 | `data` | MSE against the analytical solution, normalized per variable | training target |
-| `hybrid` | `weights.physics · physics + weights.data · data` | training target |
+| `hybrid` | `weights.physics · physics + weights.data · data`, plus `weights.neumann · L_neumann` as in `physics` | training target |
 
 With `output_param: soft` every mode adds `weights.bc · L_bc` (see Variants).
+
+**Neumann loss.** A problem can list conditions on derivative quantities as
+`NeumannCondition(edge, quantity, target)`, e.g. `("top", "sigma_yy", -p(x))` or
+`("left", "sigma_xy")`; a target of 0 is the default. `Problem.neumann_fields` computes the
+quantities with one-sided second-order differences on the edges, and any named field works, so an
+insulated edge ∂T/∂n = 0 fits the same way. Then
+
+    L_neumann = mean over the points of all conditions of ((q − target) / s)²
+
+with s from `Problem.neumann_scale`, the load RMS per sample in `elastic_block_2d`. `weights.neumann`
+is 10 in `physics` and `hybrid` and acts for every `output_param`; `loss_weights.neumann` in the
+problem YAML replaces it. In `data` it is 0 and only acts when set to > 0 explicitly with
+`training.weights.neumann`; the YAML value is not applied there. The component appears in
+`history.json` and `training.png`. `metrics.json` reports `neumann_error_mean` and
+`neumann_error_max` per condition: the largest deviation on the edge relative to s.
 
 Defaults: Adam with lr = 1e-3 and a cosine schedule, 500 epochs, batch size 32, 1000 training,
 200 validation and 200 test examples, each drawn with its own seed.
@@ -108,7 +123,7 @@ Defaults: Adam with lr = 1e-3 and a cosine schedule, 500 epochs, batch size 32, 
 
 | Mode | Checkpoint selected by (validation set) |
 |---|---|
-| `physics` | physics loss, without the analytical solution; with `soft` the objective physics + `weights.bc` · L_bc |
+| `physics` | physics loss, without the analytical solution; with `soft` or Neumann conditions the objective physics + `weights.bc` · L_bc + `weights.neumann` · L_neumann |
 | `data`, `hybrid` | mean rel. L2 over **all** output variables |
 
 The validation rel. L2 is logged in every mode, in `physics` mode for observation only. The
@@ -158,9 +173,9 @@ boundary loss the PDE does not determine the solution.
 
     L_bc = mean over the boundary points of ((u − g) / s)²,   weight `weights.bc` (default 10)
 
-The boundary points are exactly those where the hard constraint acts, φ = 0 in `boundary()`:
-the Dirichlet edges and, for problems in time, the initial time slice (`Problem.boundary_values`;
-a test checks the mask against the grid coordinates for every problem). g are the values of
+The boundary points are exactly those where the hard constraint acts, φ = 0 in `boundary()`, per
+output channel: the Dirichlet edges and, for problems in time, the initial time slice
+(`Problem.boundary_values`; a test checks the mask against the grid coordinates for every problem). g are the values of
 `boundary()` there. s is the data-loss normalization `data_scale()`, otherwise the global
 constant c (1 if unset). In `physics` mode the checkpoint is chosen by physics + `weights.bc` · L_bc
 on the validation set, because the residual alone does not see the boundary values.
@@ -187,6 +202,7 @@ default; every other value is refused. `beam_1d` and `heat_1d` have a second fam
 | `darcy_layered_1d` | **`two_layer`** | k₁, k₂ log-uniform in [0.1, 10], x_s ~ U(0.3, 0.7) |
 | `chloride_1d` | **`uniform`** | Cs ~ U(0.5, 1), D ~ U(0.2, 1) |
 | `darcy_poisson_2d` | **`sine`** | f = Σ_{m,n=1}^{4} a_mn sin(mπx) sin(nπy), a_mn ~ U(−1, 1) |
+| `elastic_block_2d` | **`cosine`** | p = p₀ + Σ_{n=1}^{6} pₙ cos(nπx), p₀ ~ U(0.5, 1), pₙ ~ U(−0.5, 0.5)/n; ν ~ U(0.15, 0.35) |
 
 Default in bold. `beam_1d` with `inputs: sine`:
 
@@ -278,6 +294,7 @@ only used to show the plots in physical units.
 | `darcy_poisson_2d` | −Δh = f on [0, 1]², h = 0 on the boundary, k = 1 | f = Σ_{m,n=1}^{4} a_mn sin(mπx) sin(nπy), a_mn ~ U(−1, 1) | h = Σ a_mn / (π²(m² + n²)) sin(mπx) sin(nπy) | h |
 | `heat_2d` | ∂T/∂t = a ΔT on [0, 1]², t ∈ [0, 0.05], a = 1, T = 0 on the boundary | T₀ = Σ_{m,n=1}^{3} b_mn sin(mπx) sin(nπy), b_mn ~ U(−1, 1) | T = Σ b_mn sin(mπx) sin(nπy) exp(−aπ²(m² + n²)t) | T |
 | `chloride_corner_2d` | ∂C/∂t = D ΔC on [0, 1]², t ∈ [0.02, 0.05]; C = Cs on x = 0 and y = 0, x = 1, y = 1 and C(x, y, t₀) analytical | Cs ~ U(0.5, 1), D ~ U(0.4, 1) | C = Cs [1 − erf(x/(2√(Dt))) · erf(y/(2√(Dt)))] (product of two 1D solutions, C₀ = 0) | C |
+| `elastic_block_2d` | Navier–Lamé in plane stress, E = 1, on [0, 1]²; sliding supports, see below | p(x) = p₀ + Σ_{n=1}^{6} pₙ cos(nπx), ν | mode 0: v = −p₀(1 − ν²)y, u = 0; modes n ≥ 1: Airy stress function Φ = cos(nπx) f(y), f = A cosh + D y sinh | v |
 
 | Benchmark | FNO | Hard constraint | Residual normalization | Reference values |
 |---|---|---|---|---|
@@ -289,8 +306,42 @@ only used to show the plots in physical units.
 | `darcy_poisson_2d` | 2D over (x, y), input f, x, y | `dirichlet_2d` (Coons patch, here g = 0), φ = x(1−x)y(1−y) | per sample divided by the RMS of f, √(Σa²)/2 | L = 10 m, H = 1 m; f = source / k in 1/m, normalized f̂ = f L²/H, so f = 0.01 f̂ 1/m |
 | `heat_2d` | 3D over (x, y, t), input T₀, x, y, t/t_end | `dirichlet_2d_t` with u₀ = T₀ and zero edges: T = T₀ + τ·x(1−x)y(1−y)·NN | divided by aπ²·2M² = 178, the fastest decay rate (as heat_1d) | L and ΔT in the YAML (1 m, 1 K); time non-dimensional, t̂ = a t/L² |
 | `chloride_corner_2d` | 3D over (x, y, t), input Cs, D, x, y, τ | `dirichlet_2d_t` with C(x, y, t₀), Cs on x = 0 and y = 0, analytical values on x = 1 and y = 1 | per sample divided by Cs/t₀ (as chloride_1d) | as chloride_1d: L = 200 mm, D_ref = 10⁻¹² m²/s, t_ref ≈ 1268 a, so t ∈ [25.3, 63.4] a; C in M.-%/binder |
+| `elastic_block_2d` | 2D over (x, y), input p(x), ν, x, y; output u, v | per channel: u = x(1−x)·c_u·NN_u, v = y·c_v·NN_v, g = 0, c = (0.019, 0.42) | residual and L_neumann divided by the load RMS per sample | L = H = 2 m, E = 30 GPa, p_ref = 10 MPa; u, v in mm, σ in MPa |
 
 The normalizations are explained in the docstrings of the problem classes.
+
+### `elastic_block_2d`: supports and results
+
+```
+            p(x) from above: σ_yy = −p(x), σ_xy = 0
+         ↓   ↓   ↓    ↓    ↓    ↓   ↓
+       ┌─────────────────────────────┐
+     ○ │                             │ ○     y
+     ○ │   elastic block, plane      │ ○     ↑
+     ○ │   stress, E = 1, ν input    │ ○     └→ x
+     ○ │                             │ ○
+       └─────────────────────────────┘
+         ○    ○    ○    ○    ○    ○
+```
+
+Sliding supports (○): x = 0 and x = 1: u = 0, σ_xy = 0; y = 0: v = 0, σ_xy = 0. The load enters
+only through the top edge: u = v = 0 has zero residual, so without L_neumann the trivial solution
+is exact. `n_modes` is 16 at 64 points, below N/2, a lesson from heat_2d. `mechanics_plots = True`
+adds `deformation.png` (deformed grid, analytical and FNO, exaggerated) and `stress.png` (FNO
+stresses by finite differences).
+
+| Variant | Mode | v | u | σ_xx | σ_yy | σ_xy | Top σ_yy error |
+|---|---|---|---|---|---|---|---|
+| constrained | physics | 9.06 % | 77.0 % | 21.6 % | 7.4 % | 38.5 % | 3.7 % |
+| constrained | data | 0.34 % | 0.81 % | 6.6 % | 6.7 % | 39.7 % | 87.9 % |
+| constrained | hybrid | 4.58 % | 15.6 % | 8.2 % | 4.7 % | 22.1 % | 7.4 % |
+| soft (bc 1) | physics | 15.5 % | 80.4 % | 21.9 % | 7.7 % | 37.1 % | 4.2 % |
+| soft (bc 1) | data | 0.27 % | 0.68 % | 4.3 % | 4.4 % | 31.6 % | 48.1 % |
+| direct | data | 0.27 % | 0.70 % | 4.3 % | 4.4 % | 32.7 % | 44.0 % |
+
+`constrained` `physics` misses the 5 % criterion; this was accepted, and the tuning stopped, because
+`data` and `hybrid` give working networks. Details, the weight search and the cause are in
+[docs/ElasticBlock.md](docs/ElasticBlock.md).
 
 ### Generic helpers
 
@@ -301,14 +352,19 @@ The normalizations are explained in the docstrings of the problem classes.
 | `numerics.constraints.dirichlet_2d` | stationary 2D: transfinite (Coons) interpolation of four edge functions |
 | `numerics.constraints.dirichlet_2d_t` | 2D in time: g = u₀(x, y) + Coons(edges(t)) − Coons(edges(t₀)), φ = τ·x(1−x)·y(1−y) |
 | `numerics.derivatives.laplacian` | second-order Laplacian in any number of dimensions |
+| `numerics.derivatives.central_mixed` | second-order mixed derivative ∂²/∂x∂y on the interior |
+| `numerics.derivatives.one_sided_d1`, `gradient` | second-order one-sided derivative on an edge; first derivative with central interior and one-sided edges |
 | `numerics.derivatives.face_flux`, `conservative_divergence` | fluxes k(u′ + g) on faces and their divergence |
 | `pdes.diffusion.diffusion_residual` | ∂u/∂t − D·Δu in any number of space dimensions (time last), Δ via `laplacian`; D scalar or per sample |
+| `pdes.elasticity.plane_stress` | σ_xx, σ_yy, σ_xy from u, v, with optional thermal strain ε_th: σ_xx = E/(1−ν²)·[(ε_xx − ε_th) + ν(ε_yy − ε_th)], σ_yy alike, σ_xy = E/(2(1+ν))·(u_y + v_x) |
+| `pdes.elasticity.navier_lame_residual` | ∇·σ = 0 in displacement form: E/(1−ν²)·[u_xx + (1−ν)/2·u_yy + (1+ν)/2·v_xy] − E/(1−ν)·∂ε_th/∂x, and the same for v with x and y swapped |
+| `problems.base.NeumannCondition` | one condition (edge, quantity, target) of `L_neumann` |
 
 ### Planned
 
-`plane_stress_bending_2d`: a
-**plane-stress disk** (Navier–Lamé equations for the displacements u and v) under pure bending.
-It is not a plate; there is no plate-bending benchmark.
+`thermoelastic_block_2d`: the block of `elastic_block_2d`, heated on top with T_top(x) as a cosine
+series, T = 0 at the bottom, insulated sides, top free of stress; steady heat conduction plus
+thermoelasticity (Goodier potential), one FNO with the outputs T, u and v.
 
 
 ## Data flow

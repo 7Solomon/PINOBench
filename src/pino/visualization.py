@@ -109,6 +109,12 @@ def plot_training(history: dict, title: str, path: Path) -> None:
         ax_loss.plot(
             history["eval_epochs"], history["val_bc"], color=color, linestyle="--", linewidth=1.2, label="bc (Validierung)"
         )
+    if history.get("val_neumann") and "neumann" in names:
+        color = SERIES_COLORS[names.index("neumann") % len(SERIES_COLORS)]
+        ax_loss.plot(
+            history["eval_epochs"], history["val_neumann"], color=color, linestyle="--", linewidth=1.2,
+            label="neumann (Validierung)",
+        )
     ax_loss.set(yscale="log", xlabel="Epoche", ylabel="Loss", title="Loss-Komponenten")
     ax_loss.legend()
 
@@ -124,7 +130,7 @@ def plot_training(history: dict, title: str, path: Path) -> None:
         ha="right",
         color=REFERENCE_COLOR,
     )
-    criterion = {"val_physics": "physics-Loss", "val_objective": "physics + bc"}.get(
+    criterion = {"val_physics": "physics-Loss", "val_objective": "physics + Randterme"}.get(
         history["selection"], "rel. L2 aller Variablen"
     )
     for ax in (ax_loss, ax_error):
@@ -280,53 +286,58 @@ def plot_solution_1d(problem: Problem, result: EvaluationResult, title: str, pat
 
 
 def plot_solution_2d(problem: Problem, result: EvaluationResult, title: str, path: Path | None):
-    """Fields over ``(x, y)`` for the best, median and worst example, one row each.
+    """Fields over ``(x, y)`` for the best, median and worst example, one row per output channel.
 
-    Panels: analytical and FNO with a shared ``viridis`` scale, the absolute error with its
-    own ``magma`` scale, and a line cut through the grid row closest to ``y = 0.5``.
+    Panels: analytical and FNO with a shared ``viridis`` scale, the absolute error with its own
+    ``magma`` scale, and a line cut through the grid row closest to the middle of ``y``.
     """
     x_name, y_name = problem.variable_names["coordinates"]
-    u_name = problem.variable_names["solution"][0]
+    names = problem.variable_names["solution"]
+    coordinates = result.dataset.grid[1, 0, :].numpy()
     x = problem.to_physical(x_name, result.dataset.grid[0, :, 0].numpy())
-    y = problem.to_physical(y_name, result.dataset.grid[1, 0, :].numpy())
-    cut = int(np.argmin(np.abs(result.dataset.grid[1, 0, :].numpy() - 0.5)))
+    y = problem.to_physical(y_name, coordinates)
+    cut = len(y) // 2 if len(y) % 2 else int(np.argmin(np.abs(coordinates - 0.5 * (coordinates[0] + coordinates[-1]))))
     extent = (x[0], x[-1], y[0], y[-1])
-    errors = result.main_errors.numpy()
-    examples = _representative_examples(errors)
+    examples = _representative_examples(result.main_errors.numpy())
+    n_rows = len(examples) * len(names)
 
     fig, axes = plt.subplots(
-        len(examples), 4, figsize=(14, 3.2 * len(examples)), constrained_layout=True, squeeze=False,
+        n_rows, 4, figsize=(14, 3.2 * n_rows), constrained_layout=True, squeeze=False,
         gridspec_kw={"width_ratios": [1, 1, 1, 1.15]},
     )
-    for row, (label, index) in zip(axes, examples):
-        exact = problem.to_physical(u_name, result.dataset.targets[index, 0].numpy())
-        predicted = problem.to_physical(u_name, result.predictions[index, 0].numpy())
-        error = np.abs(exact - predicted)
+    rows = iter(axes)
+    for label, index in examples:
+        for channel, name in enumerate(names):
+            row = next(rows)
+            exact = problem.to_physical(name, result.dataset.targets[index, channel].numpy())
+            predicted = problem.to_physical(name, result.predictions[index, channel].numpy())
+            error = np.abs(exact - predicted)
 
-        vmin, vmax = min(exact.min(), predicted.min()), max(exact.max(), predicted.max())
-        panels = (
-            ("Analytisch", exact, "viridis", vmin, vmax),
-            ("FNO", predicted, "viridis", vmin, vmax),
-            ("|Fehler|", error, "magma", 0.0, error.max()),
-        )
-        images = []
-        for ax, (name, field, cmap, low, high) in zip(row, panels):
-            image = ax.imshow(field.T, origin="lower", extent=extent, aspect="equal", cmap=cmap, vmin=low, vmax=high)
-            images.append(image)
-            ax.set(xlabel=problem.label(x_name), ylabel=problem.label(y_name), title=name)
-            ax.grid(False)
-        row[0].set_title(f"{label} (rel. L2 = {100 * errors[index]:.2f} %)\nAnalytisch")
-        row[0].axhline(y[cut], color="white", linestyle=":", linewidth=0.8)
-        fig.colorbar(images[1], ax=row[:2], label=problem.label(u_name), shrink=0.9)
-        fig.colorbar(images[2], ax=row[2], label=f"|Fehler| {problem.label(u_name)}", shrink=0.9)
+            vmin, vmax = min(exact.min(), predicted.min()), max(exact.max(), predicted.max())
+            panels = (
+                ("Analytisch", exact, "viridis", vmin, vmax),
+                ("FNO", predicted, "viridis", vmin, vmax),
+                ("|Fehler|", error, "magma", 0.0, error.max()),
+            )
+            images = []
+            for ax, (panel, field, cmap, low, high) in zip(row, panels):
+                image = ax.imshow(field.T, origin="lower", extent=extent, aspect="equal", cmap=cmap, vmin=low, vmax=high)
+                images.append(image)
+                ax.set(xlabel=problem.label(x_name), ylabel=problem.label(y_name), title=panel)
+                ax.grid(False)
+            variable = f"{name} · " if len(names) > 1 else ""
+            row[0].set_title(f"{label} · {variable}rel. L2 = {100 * result.errors[index, channel].item():.2f} %\nAnalytisch")
+            row[0].axhline(y[cut], color="white", linestyle=":", linewidth=0.8)
+            fig.colorbar(images[1], ax=row[:2], label=problem.label(name), shrink=0.9)
+            fig.colorbar(images[2], ax=row[2], label=f"|Fehler| {problem.label(name)}", shrink=0.9)
 
-        profile_axis = row[3]
-        profile_axis.plot(x, exact[:, cut], color=SERIES_COLORS[0], label="Analytisch")
-        profile_axis.plot(x, predicted[:, cut], color=SERIES_COLORS[1], linestyle="--", label="FNO")
-        profile_axis.set(
-            xlabel=problem.label(x_name), ylabel=problem.label(u_name), title=f"Schnitt {y_name} = {y[cut]:.3g}"
-        )
-        profile_axis.legend(fontsize=7)
+            profile_axis = row[3]
+            profile_axis.plot(x, exact[:, cut], color=SERIES_COLORS[0], label="Analytisch")
+            profile_axis.plot(x, predicted[:, cut], color=SERIES_COLORS[1], linestyle="--", label="FNO")
+            profile_axis.set(
+                xlabel=problem.label(x_name), ylabel=problem.label(name), title=f"Schnitt {y_name} = {y[cut]:.3g}"
+            )
+            profile_axis.legend(fontsize=7)
 
     fig.suptitle(title)
     return _save(fig, path)
@@ -394,6 +405,86 @@ def plot_solution(problem: Problem, result: EvaluationResult, title: str, path: 
     return SOLUTION_PLOTTERS[problem.plot_type](problem, result, title, path)
 
 
+def _exaggeration(extent: float, displacement: float) -> float:
+    """A round factor that shows the largest displacement as about 10 % of the block size."""
+    target = 0.1 * extent / max(displacement, 1e-30)
+    return float(f"{target:.0e}")
+
+
+def plot_deformation(problem: Problem, result: EvaluationResult, title: str, path: Path | None):
+    """Deformed grid of the best, median and worst example, analytical and FNO overlaid.
+
+    The factor of the exaggeration is chosen per example and given in its legend.
+    """
+    grid = result.dataset.grid
+    x = problem.to_physical("x", grid[0].numpy())
+    y = problem.to_physical("y", grid[1].numpy())
+    to_length = problem.displacement_in_length_unit
+    u_channel, v_channel = (problem.variable_names["solution"].index(name) for name in ("u", "v"))
+    step = max(1, (grid.shape[1] - 1) // 12)
+    examples = _representative_examples(result.main_errors.numpy())
+
+    fig, axes = plt.subplots(1, len(examples), figsize=(4.7 * len(examples), 4.9), constrained_layout=True, squeeze=False)
+    for ax, (label, index) in zip(axes[0], examples):
+        fields = {
+            "Analytisch": result.dataset.targets[index],
+            "FNO": result.predictions[index],
+        }
+        exact_u = problem.to_physical("u", fields["Analytisch"][u_channel].numpy()) * to_length
+        exact_v = problem.to_physical("v", fields["Analytisch"][v_channel].numpy()) * to_length
+        factor = _exaggeration(float(x.max() - x.min()), float(np.hypot(exact_u, exact_v).max()))
+        ax.plot(x[[0, -1, -1, 0, 0], [0, 0, -1, -1, 0]], y[[0, -1, -1, 0, 0], [0, 0, -1, -1, 0]], color="#c9c8c3", linewidth=1.0)
+        for (name, field), color, style, width in zip(fields.items(), SERIES_COLORS, ("-", "--"), (1.1, 0.9)):
+            xs = x + factor * problem.to_physical("u", field[u_channel].numpy()) * to_length
+            ys = y + factor * problem.to_physical("v", field[v_channel].numpy()) * to_length
+            indices = list(range(0, xs.shape[0], step))
+            if indices[-1] != xs.shape[0] - 1:
+                indices.append(xs.shape[0] - 1)
+            for i in indices:
+                ax.plot(xs[i, :], ys[i, :], color=color, linestyle=style, linewidth=width)
+                ax.plot(xs[:, i], ys[:, i], color=color, linestyle=style, linewidth=width)
+            ax.plot([], [], color=color, linestyle=style, label=f"{name} (Überhöhung ×{factor:g})")
+        ax.set(xlabel=problem.label("x"), ylabel=problem.label("y"), aspect="equal",
+               title=f"{label} · rel. L2 ({problem.main_variable}) = {100 * result.main_errors[index].item():.2f} %")
+        ax.grid(False)
+        ax.legend(fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.12))
+    fig.suptitle(title)
+    return _save(fig, path)
+
+
+def plot_stress(problem: Problem, result: EvaluationResult, title: str, path: Path | None):
+    """Stresses of the median example: analytical, FNO (by finite differences) and the error."""
+    order = np.argsort(result.main_errors.numpy())
+    index = int(order[len(order) // 2])
+    grid = result.dataset.grid
+    inputs = result.dataset.inputs[index : index + 1]
+    predicted = problem.stress_fields(result.predictions[index : index + 1], inputs, grid)
+    exact = problem.exact_stress_fields(inputs, grid)
+    x = problem.to_physical("x", grid[0, :, 0].numpy())
+    y = problem.to_physical("y", grid[1, 0, :].numpy())
+    extent = (x[0], x[-1], y[0], y[-1])
+
+    fig, axes = plt.subplots(len(exact), 3, figsize=(11, 3.3 * len(exact)), constrained_layout=True, squeeze=False)
+    for row, name in zip(axes, exact):
+        analytical = problem.to_physical("sigma", exact[name][0].numpy())
+        fno = problem.to_physical("sigma", predicted[name][0].numpy())
+        error = np.abs(analytical - fno)
+        vmin, vmax = min(analytical.min(), fno.min()), max(analytical.max(), fno.max())
+        panels = (("Analytisch", analytical, "viridis", vmin, vmax), ("FNO (FD)", fno, "viridis", vmin, vmax),
+                  ("|Fehler|", error, "magma", 0.0, error.max()))
+        images = []
+        for ax, (panel, field, cmap, low, high) in zip(row, panels):
+            images.append(ax.imshow(field.T, origin="lower", extent=extent, aspect="equal", cmap=cmap, vmin=low, vmax=high))
+            ax.set(xlabel=problem.label("x"), ylabel=problem.label("y"), title=f"{panel} · {name}")
+            ax.grid(False)
+        relative = np.linalg.norm(error) / np.linalg.norm(analytical)
+        row[1].set_title(f"FNO (FD) · {name} · rel. L2 = {100 * relative:.2f} %")
+        fig.colorbar(images[1], ax=row[:2], label=f"{name} [{problem.units['sigma']}]", shrink=0.9)
+        fig.colorbar(images[2], ax=row[2], label=f"|Fehler| [{problem.units['sigma']}]", shrink=0.9)
+    fig.suptitle(f"{title}\nMedian-Beispiel")
+    return _save(fig, path)
+
+
 def plot_prediction(problem: Problem, prediction, mode: str, path: Path | None = None):
     """Solution plot of a single :class:`pino.inference.Prediction`.
 
@@ -416,6 +507,9 @@ def plot_run(problem: Problem, result: EvaluationResult, history: dict, mode: st
     plot_solution(problem, result, title, run_dir / "solution.png")
     plot_error_histogram(errors, title, run_dir / "error_hist.png")
     plot_resolution(result.main_resolution_errors(), train_resolution, title, run_dir / "resolution.png")
+    if problem.mechanics_plots:
+        plot_deformation(problem, result, title, run_dir / "deformation.png")
+        plot_stress(problem, result, title, run_dir / "stress.png")
 
 
 def _problem_group(benchmark: str) -> str:

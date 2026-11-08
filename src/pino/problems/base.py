@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import torch
 from torch import Tensor
@@ -21,6 +22,32 @@ from torch import Tensor
 OUTPUT_PARAMS = ("constrained", "unscaled", "direct", "soft")
 #: Output parametrizations without g and phi in the prediction: ``u = c NN``.
 UNCONSTRAINED = ("direct", "soft")
+
+
+#: Edge of a 2D domain -> (grid axis, end of that axis).
+EDGES = {"left": (0, 0), "right": (0, -1), "bottom": (1, 0), "top": (1, -1)}
+
+
+@dataclass(frozen=True)
+class NeumannCondition:
+    """A condition ``quantity = target`` on an edge, e.g. ``sigma_yy = -p(x)`` on ``top``.
+
+    ``quantity`` names a field of :meth:`Problem.neumann_fields`: a stress, or a derivative such
+    as ``T_y`` for an insulated edge. ``target`` is a number or a tensor ``(B, N)`` along the edge.
+    """
+
+    edge: str
+    quantity: str
+    target: Tensor | float = 0.0
+
+    @property
+    def label(self) -> str:
+        return f"{self.edge}:{self.quantity}"
+
+    def values(self, field: Tensor) -> Tensor:
+        """Restrict a field ``(B, Nx, Ny)`` to the edge, ``(B, N)``."""
+        axis, end = EDGES[self.edge]
+        return field.select(axis + 1, end)
 
 
 class Problem(ABC):
@@ -43,6 +70,9 @@ class Problem(ABC):
     output_param: str = "constrained"
     #: Global output constant ``c`` per channel for ``unscaled`` and ``direct``.
     output_scale_global: tuple[float, ...] | None = None
+
+    #: Also write ``deformation.png`` and ``stress.png`` (needs :meth:`stress_fields`).
+    mechanics_plots: bool = False
 
     #: Registry name, set by ``@register_problem``.
     name: str
@@ -161,16 +191,46 @@ class Problem(ABC):
         slice. ``phi`` is built from products of ``x``, ``1 - x`` and ``tau``, which are exactly
         zero on the boundary nodes of :func:`~pino.numerics.grids.uniform_grid` and nowhere
         else (checked for every problem in ``tests/test_soft.py``). ``mask`` is a bool tensor of
-        shape ``(1, 1, *resolution)``, ``g`` has shape ``(B, C, *resolution)``.
+        shape ``(1, K, *resolution)``, with ``K = C`` if ``phi`` differs per output channel, as a
+        channel may be prescribed on other edges than another, otherwise ``K = 1``. ``g`` has
+        shape ``(B, C, *resolution)``.
         """
         g, phi = self.boundary(inputs, grid)
-        mask = (phi == 0).expand(1, 1, *grid.shape[1:])
+        mask = (phi == 0).expand(1, phi.shape[1], *grid.shape[1:])
         return g.expand(inputs.shape[0], self.out_channels, *grid.shape[1:]), mask
 
     def boundary_scale(self, inputs: Tensor, grid: Tensor) -> Tensor:
         """Normalization ``s`` of ``L_bc``: :meth:`data_scale`, otherwise the global constant ``c``."""
         scale = self.data_scale(inputs, grid)
         return self.global_output_scale(grid) if scale is None else scale
+
+    def neumann_conditions(self, inputs: Tensor, grid: Tensor) -> list[NeumannCondition]:
+        """Conditions on stresses or derivatives on the boundary, enforced by ``L_neumann``."""
+        return []
+
+    def neumann_fields(self, u: Tensor, inputs: Tensor, grid: Tensor) -> dict[str, Tensor]:
+        """The quantities named by the conditions, on all grid points, ``(B, *resolution)``.
+
+        They must use one-sided differences of second order on the boundary, see
+        :func:`pino.numerics.derivatives.gradient`.
+        """
+        return {}
+
+    def neumann_scale(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        """Normalization of ``L_neumann`` per sample, shape ``(B,)``."""
+        return torch.ones(inputs.shape[0], dtype=inputs.dtype, device=inputs.device)
+
+    @property
+    def has_neumann(self) -> bool:
+        return type(self).neumann_conditions is not Problem.neumann_conditions
+
+    def stress_fields(self, u: Tensor, inputs: Tensor, grid: Tensor) -> dict[str, Tensor] | None:
+        """Stresses of a displacement field by finite differences, each ``(B, *resolution)``."""
+        return None
+
+    def exact_stress_fields(self, inputs: Tensor, grid: Tensor) -> dict[str, Tensor] | None:
+        """The analytical stresses, in the same layout as :meth:`stress_fields`."""
+        return None
 
     def check_mode(self, mode: str) -> None:
         """Reject training modes that are ill-posed for the output parametrization."""

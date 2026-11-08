@@ -9,11 +9,13 @@ import torch
 from torch import Tensor
 
 from pino.analytical.beam import simply_supported_beam, simply_supported_beam_sine
+from pino.analytical.elasticity import cosine_series, elastic_block
 from pino.analytical.diffusion import sine_series
 from pino.numerics.constraints import dirichlet_1d
 from pino.numerics.derivatives import central_d2, interior
 from pino.numerics.grids import as_resolution, grid_spacing, uniform_grid
-from pino.problems.base import Problem
+from pino.pdes.elasticity import navier_lame_residual, plane_stress
+from pino.problems.base import NeumannCondition, Problem
 from pino.problems.registry import register_problem
 
 
@@ -157,3 +159,134 @@ class Beam1D(Problem):
     def _load_rms(inputs: Tensor) -> Tensor:
         """RMS of the sine-series load over ``[0, 1]``, ``sqrt(sum q_n^2 / 2)``, at least 1e-3."""
         return (0.5 * inputs[:, :-1].pow(2).sum(dim=1)).sqrt().clamp_min(1e-3)
+
+
+@register_problem("elastic_block_2d")
+class ElasticBlock2D(Problem):
+    """Elastic block in a frictionless box, loaded from above; plane stress, ``E = 1``.
+
+    Domain ``[0, 1] x [0, H]``, ``x`` horizontal and ``y`` upwards. Sliding supports on three
+    sides: ``u = 0``, ``sigma_xy = 0`` on ``x = 0, 1`` and ``v = 0``, ``sigma_xy = 0`` on ``y = 0``.
+    On top ``sigma_yy = -p(x)``, ``sigma_xy = 0`` with ``p = p_0 + sum_n p_n cos(n pi x)``.
+
+    Operator inputs are ``(p_0, p_1, ..., p_N, nu)`` with shape ``(B, N + 2)``. The network sees
+    ``p(x)`` and ``nu`` broadcast over the grid, plus ``x`` and ``y``; it predicts ``u, v``.
+
+    The load enters only through the top edge: ``u = v = 0`` has zero residual, so ``L_neumann``
+    is what makes the problem non-trivial. Hard constraint per channel, with the global
+    constants ``c`` of the YAML: ``u = x (1 - x) c_u NN_u``, ``v = y c_v NN_v``. Residual and
+    ``L_neumann`` are divided by the load RMS per sample, the data loss by ``c``, so that ``u``
+    and ``v`` count alike although ``u`` is much smaller.
+
+    Non-dimensionalization: ``x = x_hat L``, ``sigma = sigma_hat p_ref``, ``u = u_hat p_ref L / E``.
+    """
+
+    WRAPPER_VERSION = "1"
+    SUPPORTED_INPUTS = ("cosine",)  # p(x) = cosine series, nu uniform
+
+    n_dims = 2
+    in_channels = 4  # p(x), nu, x, y
+    out_channels = 2  # u, v
+    plot_type = "2d"
+    mechanics_plots = True
+    variable_names = {"coordinates": ["x", "y"], "solution": ["u", "v"]}
+    units = {"x": "m", "y": "m", "u": "mm", "v": "mm", "sigma": "MPa"}
+    #: Displacement unit in the unit of the coordinates: mm in m, for the deformed grid.
+    displacement_in_length_unit = 1e-3
+
+    def __init__(self, cfg) -> None:
+        self.n_series = int(cfg.n_series)
+        self.mean_load_range = (float(cfg.mean_load_low), float(cfg.mean_load_high))
+        self.coeff_range = (float(cfg.coeff_low), float(cfg.coeff_high))
+        self.poisson_range = (float(cfg.poisson_low), float(cfg.poisson_high))
+        self.height = float(cfg.height)
+        length, modulus, load = float(cfg.length), float(cfg.youngs_modulus_gpa), float(cfg.load_ref_mpa)
+        displacement = length * load / modulus  # m * MPa / GPa = mm
+        self.scales = {"x": length, "y": length, "u": displacement, "v": displacement, "sigma": load}
+
+    @property
+    def main_variable(self) -> str:
+        return "v"
+
+    def grid(self, resolution: int | Sequence[int]) -> Tensor:
+        return uniform_grid([(0.0, 1.0), (0.0, self.height)], as_resolution(resolution, self.n_dims))
+
+    def sample_inputs(self, n: int, generator: torch.Generator) -> Tensor:
+        low, high = self.mean_load_range
+        mean = low + (high - low) * torch.rand(n, 1, generator=generator)
+        low, high = self.coeff_range
+        decay = torch.arange(1, self.n_series + 1, dtype=torch.get_default_dtype())
+        coefficients = (low + (high - low) * torch.rand(n, self.n_series, generator=generator)) / decay
+        low, high = self.poisson_range
+        poisson = low + (high - low) * torch.rand(n, 1, generator=generator)
+        return torch.cat([mean, coefficients, poisson], dim=1)
+
+    def _solution(self, inputs: Tensor, grid: Tensor) -> dict[str, Tensor]:
+        return elastic_block(inputs[:, 0], inputs[:, 1:-1], inputs[:, -1], grid[0], grid[1], 1.0, self.height)
+
+    def analytical(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        solution = self._solution(inputs, grid)
+        return torch.stack([solution["u"], solution["v"]], dim=1)
+
+    def load(self, inputs: Tensor, x: Tensor) -> Tensor:
+        """``p`` at ``x``, shape ``(B, *x.shape)``."""
+        extra = (1,) * x.dim()
+        return inputs[:, 0].reshape(-1, *extra) + cosine_series(inputs[:, 1:-1], x)
+
+    def _load_rms(self, inputs: Tensor) -> Tensor:
+        """RMS of ``p`` over the width, ``sqrt(p_0^2 + sum p_n^2 / 2)``, shape ``(B,)``."""
+        return (inputs[:, 0].pow(2) + 0.5 * inputs[:, 1:-1].pow(2).sum(dim=1)).sqrt()
+
+    def residual(self, u: Tensor, inputs: Tensor, grid: Tensor) -> Tensor:
+        """Navier-Lame in displacement form divided by the load RMS per sample, on interior points.
+
+        The residual of a wrong field is then of the order of the relative load error, whatever
+        the size of the load. A normalization of the loss only.
+        """
+        nu = inputs[:, -1, None, None]
+        first, second = navier_lame_residual(u[:, 0], u[:, 1], grid_spacing(grid, 0), grid_spacing(grid, 1), 1.0, nu)
+        return torch.stack([first, second], dim=1) / self._load_rms(inputs)[:, None, None, None]
+
+    def boundary(self, inputs: Tensor, grid: Tensor) -> tuple[Tensor, Tensor]:
+        """``g = 0``, ``phi_u = x (1 - x)``, ``phi_v = y``: each output has its own supports."""
+        x, y = grid[0], grid[1]
+        phi = torch.stack([x * (1.0 - x), y])[None]
+        return inputs.new_zeros(inputs.shape[0], 2, *grid.shape[1:]), phi
+
+    def output_scale(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        """The global constants ``c_u, c_v``: no per-sample scale."""
+        return self.global_output_scale(grid)
+
+    def data_scale(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        """The same constants, so that ``u`` and ``v`` count alike in the data loss and ``L_bc``."""
+        return self.global_output_scale(grid)
+
+    def neumann_conditions(self, inputs: Tensor, grid: Tensor) -> list[NeumannCondition]:
+        """Zero shear on all four edges, the load on top."""
+        return [
+            NeumannCondition("left", "sigma_xy"),
+            NeumannCondition("right", "sigma_xy"),
+            NeumannCondition("bottom", "sigma_xy"),
+            NeumannCondition("top", "sigma_xy"),
+            NeumannCondition("top", "sigma_yy", -self.load(inputs, grid[0, :, 0])),
+        ]
+
+    def neumann_fields(self, u: Tensor, inputs: Tensor, grid: Tensor) -> dict[str, Tensor]:
+        return self.stress_fields(u, inputs, grid)
+
+    def neumann_scale(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        return self._load_rms(inputs)
+
+    def stress_fields(self, u: Tensor, inputs: Tensor, grid: Tensor) -> dict[str, Tensor]:
+        nu = inputs[:, -1, None, None]
+        return plane_stress(u[:, 0], u[:, 1], grid_spacing(grid, 0), grid_spacing(grid, 1), 1.0, nu)
+
+    def exact_stress_fields(self, inputs: Tensor, grid: Tensor) -> dict[str, Tensor]:
+        solution = self._solution(inputs, grid)
+        return {name: solution[name] for name in ("sigma_xx", "sigma_yy", "sigma_xy")}
+
+    def to_fno_input(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        x, y = grid[0], grid[1]
+        batch = inputs.shape[0]
+        poisson = inputs[:, -1, None, None].expand(-1, *x.shape)
+        return torch.stack([self.load(inputs, x), poisson, x.expand(batch, -1, -1), y.expand(batch, -1, -1)], dim=1)

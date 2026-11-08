@@ -41,7 +41,11 @@ def expected_mask(problem, grid: torch.Tensor) -> torch.Tensor:
     return mask
 
 
-@pytest.mark.parametrize("name", available_problems())
+#: Prescribes each output channel on its own edges, see tests/test_elastic_block.py.
+PER_CHANNEL = ("elastic_block_2d",)
+
+
+@pytest.mark.parametrize("name", [name for name in available_problems() if name not in PER_CHANNEL])
 @pytest.mark.parametrize("resolution", [8, 17])
 def test_boundary_mask_hits_exactly_the_boundary_and_initial_points(name, resolution):
     problem = build_problem(problem_cfg(name))

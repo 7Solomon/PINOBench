@@ -32,6 +32,7 @@ EXPECTED_INPUTS = {
     "beam_1d": ("linear", "sine"),
     "chloride_1d": ("uniform",),
     "chloride_corner_2d": ("uniform",),
+    "elastic_block_2d": ("cosine",),
     "darcy_layered_1d": ("two_layer",),
     "darcy_poisson_2d": ("sine",),
     "heat_1d": ("sine", "sine_ramp"),
