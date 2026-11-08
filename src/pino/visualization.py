@@ -29,7 +29,7 @@ SUMMARY_GROUPS = {
     "mechanics": "Strukturmechanik",
     "thermal": "Wärmeleitung",
     "transport": "Stofftransport",
-    "hydro": "Strömung in porösen Medien",
+    "hydro": "Strömung",
 }
 #: Mode -> offset within a slot, marker shape, color.
 SUMMARY_MODES = {
