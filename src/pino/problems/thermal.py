@@ -8,7 +8,7 @@ from collections.abc import Sequence
 import torch
 from torch import Tensor
 
-from pino.analytical.diffusion import heat_sine_series, heat_sine_series_2d, sine_series
+from pino.analytical.diffusion import heat_ramp_series, heat_sine_series, heat_sine_series_2d, sine_series
 from pino.numerics.constraints import dirichlet_1d_t, dirichlet_2d_t
 from pino.numerics.grids import as_resolution, uniform_grid
 from pino.pdes.diffusion import diffusion_residual
@@ -23,14 +23,19 @@ class Heat1D(Problem):
     The operator maps the initial profile ``T0(x) = sum_n b_n sin(n pi x)`` to ``T(x, t)``.
     Operator inputs are the coefficients ``b_n`` with shape ``(B, N)``.
     The grid has shape ``(2, Nx, Nt)`` with the channels ``x`` and ``t``.
+
+    ``inputs = sine_ramp`` adds boundary values linear in time, ``T(0, t) = alpha_L + beta_L t``
+    and ``T(1, t) = alpha_R + beta_R t``, with the compatible initial profile
+    ``T0 = (1 - x) alpha_L + x alpha_R + sum_n b_n sin(n pi x)``. Operator inputs are then
+    ``(b_1, ..., b_N, alpha_L, beta_L, alpha_R, beta_R)`` with shape ``(B, N + 4)``, and the
+    network also sees ``T_L(t)`` and ``T_R(t)``.
     """
 
     # 1: phi = t x (1 - x) (until Phase 2); 2: dirichlet_1d_t, phi = tau x (1 - x).
     WRAPPER_VERSION = "2"
-    SUPPORTED_INPUTS = ("sine",)  # T0 = sine series
+    SUPPORTED_INPUTS = ("sine", "sine_ramp")  # T0 = sine series; plus boundary values linear in t
 
     n_dims = 2
-    in_channels = 3  # T0(x), x, t / t_end
     out_channels = 1
     plot_type = "1d_t"
     variable_names = {"coordinates": ["x", "t"], "solution": ["T"]}
@@ -43,17 +48,33 @@ class Heat1D(Problem):
         self.n_series = int(cfg.n_series)
         self.coeff_low = float(cfg.coeff_low)
         self.coeff_high = float(cfg.coeff_high)
+        # Boundary ramps of inputs = sine_ramp: start values alpha and rates beta.
+        self.start_range = (float(cfg.get("bc_start_low", -1.0)), float(cfg.get("bc_start_high", 1.0)))
+        self.rate_range = (float(cfg.get("bc_rate_low", -10.0)), float(cfg.get("bc_rate_high", 10.0)))
         # Largest decay rate in the solution, the fastest mode's a * (N pi)^2.
         self.residual_scale = self.a * (self.n_series * math.pi) ** 2
+
+    @property
+    def in_channels(self) -> int:
+        """``T0(x), x, t / t_end``; ``sine_ramp`` adds ``T_L(t)`` and ``T_R(t)``."""
+        return 5 if self.inputs == "sine_ramp" else 3
 
     def grid(self, resolution: int | Sequence[int]) -> Tensor:
         return uniform_grid([(0.0, 1.0), (0.0, self.t_end)], as_resolution(resolution, self.n_dims))
 
     def sample_inputs(self, n: int, generator: torch.Generator) -> Tensor:
         unit = torch.rand(n, self.n_series, generator=generator)
-        return self.coeff_low + (self.coeff_high - self.coeff_low) * unit
+        coefficients = self.coeff_low + (self.coeff_high - self.coeff_low) * unit
+        if self.inputs != "sine_ramp":
+            return coefficients
+        low = torch.tensor([self.start_range[0], self.rate_range[0]] * 2)
+        high = torch.tensor([self.start_range[1], self.rate_range[1]] * 2)
+        return torch.cat([coefficients, low + (high - low) * torch.rand(n, 4, generator=generator)], dim=1)
 
     def analytical(self, inputs: Tensor, grid: Tensor) -> Tensor:
+        if self.inputs == "sine_ramp":
+            ramps = inputs[:, self.n_series :].unbind(dim=1)
+            return heat_ramp_series(inputs[:, : self.n_series], *ramps, grid[0], grid[1], self.a).unsqueeze(1)
         return heat_sine_series(inputs, grid[0], grid[1], self.a).unsqueeze(1)
 
     def residual(self, u: Tensor, inputs: Tensor, grid: Tensor) -> Tensor:
@@ -67,9 +88,18 @@ class Heat1D(Problem):
         return diffusion_residual(u, grid, self.a) / self.residual_scale
 
     def boundary(self, inputs: Tensor, grid: Tensor) -> tuple[Tensor, Tensor]:
-        """Return ``g = T0(x)`` and ``phi = tau x (1 - x)`` with ``tau = t / t_end``."""
+        """``dirichlet_1d_t`` with ``T0``, ``phi = tau x (1 - x)``, ``tau = t / t_end``.
+
+        ``g = T0(x)`` for ``sine``; ``sine_ramp`` adds ``(1 - x) beta_L t + x beta_R t``.
+        """
         x, t = grid[0, :, 0], grid[1, 0, :]
         initial = self._initial_profile(inputs, x)
+        if self.inputs == "sine_ramp":
+            alpha_left, beta_left, alpha_right, beta_right = (inputs[:, self.n_series + i, None, None] for i in range(4))
+            # sin(n pi) is only zero up to rounding, the end values are exactly the start values.
+            initial[..., 0] = alpha_left[..., 0]
+            initial[..., -1] = alpha_right[..., 0]
+            return dirichlet_1d_t(x, t, initial, alpha_left + beta_left * t, alpha_right + beta_right * t)
         # sin(n pi) is only zero up to rounding, the Dirichlet value itself is exactly zero.
         initial[..., 0] = 0.0
         initial[..., -1] = 0.0
@@ -80,11 +110,21 @@ class Heat1D(Problem):
         x, t = grid[0], grid[1]
         batch = inputs.shape[0]
         coordinates = torch.stack([x, t / self.t_end]).expand(batch, -1, -1, -1)
-        return torch.cat([self._initial_profile(inputs, x), coordinates], dim=1)
+        channels = [self._initial_profile(inputs, x), coordinates]
+        if self.inputs == "sine_ramp":
+            alpha_left, beta_left, alpha_right, beta_right = (inputs[:, self.n_series + i, None, None] for i in range(4))
+            channels.insert(1, torch.stack([alpha_left + beta_left * t, alpha_right + beta_right * t], dim=1))
+        return torch.cat(channels, dim=1)
 
-    @staticmethod
-    def _initial_profile(inputs: Tensor, x: Tensor) -> Tensor:
-        return sine_series(inputs, x).unsqueeze(1)
+    def _initial_profile(self, inputs: Tensor, x: Tensor) -> Tensor:
+        """``T0`` at ``x``, shape ``(B, 1, *x.shape)``."""
+        profile = sine_series(inputs[:, : self.n_series], x)
+        if self.inputs == "sine_ramp":
+            extra = (1,) * x.dim()
+            alpha_left = inputs[:, self.n_series].reshape(-1, *extra)
+            alpha_right = inputs[:, self.n_series + 2].reshape(-1, *extra)
+            profile = profile + (1.0 - x) * alpha_left + x * alpha_right
+        return profile.unsqueeze(1)
 
 
 @register_problem("heat_2d")

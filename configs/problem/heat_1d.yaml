@@ -8,7 +8,7 @@ coeff_low: -1.0
 coeff_high: 1.0
 
 # Variants (see README). Defaults reproduce the original benchmark.
-inputs: sine                 # sine
+inputs: sine                 # sine | sine_ramp (configs/problem/heat_1d_sine_ramp.yaml)
 output_param: constrained    # constrained | unscaled | direct (data mode only) | soft
 output_scale_global: null    # c per output channel for unscaled and direct; null = 1
 

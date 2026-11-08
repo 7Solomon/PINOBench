@@ -1,0 +1,16 @@
+# heat_1d with boundary values linear in time: T(0, t) = alpha_L + beta_L t, T(1, t) = alpha_R + beta_R t,
+# compatible initial profile T0 = (1 - x) alpha_L + x alpha_R + sum_n b_n sin(n pi x), b_n as in heat_1d.
+# Exact solution by lifting plus a sine series of the ramp source (analytical.diffusion.heat_ramp_series).
+# Usage: python scripts/train.py problem=heat_1d_sine_ramp training=physics
+defaults:
+  - heat_1d
+  - _self_
+
+inputs: sine_ramp
+bc_start_low: -1.0   # alpha_L, alpha_R
+bc_start_high: 1.0
+bc_rate_low: -10.0   # beta_L, beta_R: the boundary value changes by at most 1 over t_end = 0.1
+bc_rate_high: 10.0
+# Global output constant c for unscaled, direct and soft: RMS of T over 200 000 samples of
+# this input family on 64 points (0.605), rounded.
+output_scale_global: [0.6]
