@@ -24,6 +24,12 @@ output_param: constrained    # constrained | unscaled | direct (data mode only) 
 # 0.419), rounded. u is about 22 times smaller than v.
 output_scale_global: [0.019, 0.42]
 
+# neumann: from the weight search in physics (docs/ElasticBlock.md), 100 beat 1 and 10.
+# bc: as for the other 2D benchmarks, only with output_param=soft.
+loss_weights:
+  neumann: 100.0
+  bc: 1.0
+
 train_resolution: 64
 test_resolution: 64
 resolution_study: [32, 64, 128, 256]
