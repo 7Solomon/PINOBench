@@ -1,0 +1,37 @@
+# Block of elastic_block_2d heated on top: steady conduction and plane stress, E = alpha = 1, on [0, 1] x [0, H].
+# T: T(x, H) = t_0 + sum_{n=1..N} t_n cos(n pi x), T(x, 0) = 0, insulated sides.
+# Sliding supports: x = 0, 1: u = 0, sigma_xy = 0; y = 0: v = 0, sigma_xy = 0. Top: free of stress.
+name: thermoelastic_block_2d
+n_series: 6
+mean_temperature_low: 0.5    # t_0
+mean_temperature_high: 1.0
+coeff_low: -0.5              # t_n ~ U(coeff_low, coeff_high) / n
+coeff_high: 0.5
+poisson_low: 0.15            # nu
+poisson_high: 0.35
+height: 1.0                  # H / L
+
+# Reference values: T = T_hat dT_ref, x = x_hat L, u = u_hat L alpha dT_ref, sigma = sigma_hat E alpha dT_ref
+# (2 m * 1e-5 / K * 20 K = 0.4 mm, 30 GPa * 1e-5 / K * 20 K = 6 MPa).
+length: 2.0                  # m
+youngs_modulus_gpa: 30.0
+thermal_expansion_per_k: 1.0e-5
+temperature_ref_k: 20.0
+
+# Variants (see README). Defaults reproduce the original benchmark.
+inputs: cosine               # cosine
+output_param: constrained    # constrained | unscaled | direct (data mode only) | soft
+# Global output constants c_T, c_u, c_v: RMS of T, u and v over 20 000 samples on 64 points (0.452,
+# 0.0257 and 0.218), rounded.
+output_scale_global: [0.45, 0.026, 0.22]
+
+# neumann: from the weight search in physics (docs/ThermoelasticBlock.md): v is level for 1 and 10, 10 halves
+# the error of u, 100 is worse in v.
+# bc: as for the other 2D benchmarks, only with output_param=soft.
+loss_weights:
+  neumann: 10.0
+  bc: 1.0
+
+train_resolution: 64
+test_resolution: 64
+resolution_study: [32, 64, 128, 256]

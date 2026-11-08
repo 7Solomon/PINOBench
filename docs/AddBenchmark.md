@@ -15,7 +15,7 @@
    | `WRAPPER_VERSION` | string, increase it whenever `boundary()` or `output_scale()` change |
    | `boundary(inputs, grid)` | `(g, φ)` for `u = g + φ·NN`, φ only the fixed shape part; use `numerics.constraints.dirichlet_1d`, `dirichlet_1d_t`, `dirichlet_2d` or `dirichlet_2d_t`; φ may differ per channel, shape `(1, C, *resolution)`, then the `soft` mask does too |
    | `neumann_conditions(inputs, grid)`, `neumann_fields(u, inputs, grid)`, `neumann_scale(inputs, grid)` | optional: conditions on stresses or fluxes for `L_neumann`, the fields they name, and the normalization per sample |
-   | `stress_fields(u, inputs, grid)`, `exact_stress_fields(inputs, grid)`, `mechanics_plots` | optional: stress metrics, with `mechanics_plots = True` also `deformation.png` and `stress.png` |
+   | `stress_fields(u, inputs, grid)`, `exact_stress_fields(inputs, grid)`, `mechanics_plots` | optional: stress metrics (rel. L2 and `stress_rmse` in physical units), with `mechanics_plots = True` also `deformation.png` and `stress.png` |
    | `to_fno_input(inputs, grid)` | network input `(B, in_channels, *resolution)` including coordinates |
    | `output_scale(inputs, grid)` | optional: per-sample scale s of the output, `constrained` only |
    | `data_scale(inputs, grid)` | optional: typical size of each output channel for the data loss |
