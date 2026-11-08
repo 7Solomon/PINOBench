@@ -12,7 +12,7 @@ head_ref: 1.0   # m
 
 # Variants (see README). Defaults reproduce the original benchmark.
 inputs: sine                 # sine
-output_param: constrained    # constrained | unscaled | direct (data mode only)
+output_param: constrained    # constrained | unscaled | direct (data mode only) | soft
 output_scale_global: null    # c per output channel for unscaled and direct; null = 1
 
 train_resolution: 64

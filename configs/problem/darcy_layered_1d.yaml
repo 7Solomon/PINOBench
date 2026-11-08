@@ -14,7 +14,7 @@ k_ref: 1.0e-5        # m/s
 
 # Variants (see README). Defaults reproduce the original benchmark.
 inputs: two_layer            # two_layer
-output_param: constrained    # constrained | unscaled | direct (data mode only)
+output_param: constrained    # constrained | unscaled | direct (data mode only) | soft
 output_scale_global: null    # c per output channel for unscaled and direct; null = 1
 
 train_resolution: 64

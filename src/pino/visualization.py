@@ -331,6 +331,7 @@ def plot_solution_2d_t(problem: Problem, result: EvaluationResult, title: str, p
     y = problem.to_physical(y_name, grid[1, 0, :, 0].numpy())
     t = problem.to_physical(t_name, grid[2, 0, 0, :].numpy())
     times = [0, (len(t) - 1) // 2, len(t) - 1]
+    time_unit = "" if problem.units[t_name] == "-" else f" {problem.units[t_name]}"
     extent = (x[0], x[-1], y[0], y[-1])
     errors = result.main_errors.numpy()
     channel = problem.main_channel
@@ -351,7 +352,7 @@ def plot_solution_2d_t(problem: Problem, result: EvaluationResult, title: str, p
                 image = ax.imshow(field[:, :, time_index].T, origin="lower", extent=extent, aspect="equal",
                                   cmap=cmap, vmin=low, vmax=high)
                 ax.set(xlabel=problem.label(x_name), ylabel=problem.label(y_name),
-                       title=f"{name} · {t_name} = {t[time_index]:.3g} {problem.units[t_name]}")
+                       title=f"{name} · {t_name} = {t[time_index]:.3g}{time_unit}")
                 ax.grid(False)
             unit = problem.label(u_name) if name != "|Fehler|" else f"|Fehler| {problem.label(u_name)}"
             fig.colorbar(image, ax=row_axes, label=unit, shrink=0.9)

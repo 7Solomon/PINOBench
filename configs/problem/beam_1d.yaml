@@ -16,7 +16,7 @@ stiffness_ref: 1.0e4 # kNm^2
 
 # Variants (see README). Defaults reproduce the original benchmark.
 inputs: linear               # linear | sine (configs/problem/beam_1d_sine.yaml)
-output_param: constrained    # constrained | unscaled | direct (data mode only)
+output_param: constrained    # constrained | unscaled | direct (data mode only) | soft
 # Global output constants c for unscaled and direct: RMS of w and M over 200 000 samples of
 # this input family on 64 points (0.0075 and 0.0741), rounded.
 output_scale_global: [0.0075, 0.075]

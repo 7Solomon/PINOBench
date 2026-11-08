@@ -27,7 +27,8 @@
    `train_resolution`, `test_resolution` and `resolution_study`, plus `inputs` (the first entry
    of `SUPPORTED_INPUTS`, it appears in the run directory),
    `output_param` and `output_scale_global` (see the README). Optional: `loss_weights` for
-   the `hybrid` mode.
+   the `hybrid` mode and `bc` in every mode (`output_param: soft`); `training` for problems
+   that need their own `epochs`, `batch_size` and similar settings to stay within the time budget.
 4. **Tests** in `tests/`: PDE satisfied via autograd, boundaries exact, FD residual of the
    analytical solution small and convergent, shapes and hard constraint.
 5. Train with `python scripts/train.py problem=<name> training=physics`.

@@ -9,7 +9,7 @@ coeff_high: 1.0
 
 # Variants (see README). Defaults reproduce the original benchmark.
 inputs: sine                 # sine
-output_param: constrained    # constrained | unscaled | direct (data mode only)
+output_param: constrained    # constrained | unscaled | direct (data mode only) | soft
 output_scale_global: null    # c per output channel for unscaled and direct; null = 1
 
 # Weight of the boundary penalty L_bc (output_param=soft only), from the soft pilot

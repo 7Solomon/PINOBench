@@ -78,10 +78,11 @@ Validation error during training (evaluated every 5 epochs):
 | soft, bc 1 | 1.64 % | 1 / 0 |
 
 - The **resolution dependence remains** with soft: the error is lowest at the training
-  resolution and grows towards coarser and finer grids in the same pattern. It is therefore
-  not caused by the division by τ in the hard constraint; more likely candidates are the FNO
-  itself (modes and padding fixed in grid points) and the FD residual, which is only exact on
-  the training grid.
+  resolution and grows towards coarser and finer grids in the same pattern, slightly weaker
+  (6.3 % against 8.0 % at 32). The division by τ is therefore not its only cause. On heat_2d
+  soft reduces it by a factor of 2.5 to 3 (see below), so the hard constraint does contribute.
+  Whether the FNO itself (modes and padding fixed in grid points) accounts for the remainder
+  was not tested.
 - The **jumps in training are reduced**: no jump in the second half with soft, against two
   with constrained, and half the maximum error. This fits the explanation that the wrapper
   makes the learning target near t = 0 large (division by τ); a single seed does not prove it.
@@ -102,6 +103,35 @@ Caveats: one seed per configuration, and 1D GPU training is not bit-reproducible
 VariantPilot.md); differences below a factor of about 1.5 are not significant. Training
 times of the pilot (830–1350 s) are not comparable with the constrained runs because nine runs
 shared the GPU.
+
+## 2D + t: heat_2d and chloride_corner_2d
+
+The criterion was met, so both new benchmarks also ran with soft in physics and data, with
+bc = 1 (the weight of heat_1d, the most similar benchmark). Seed 42, grid 32³, 200 epochs.
+
+| Benchmark | Variant | Mode | rel. L2 mean | Worst test example | Boundary error mean / max | Error at 24³ / 48³ / 64³ | 2nd-half max val. error | Jumps > 1.5× (1st / 2nd half) |
+|---|---|---|---|---|---|---|---|---|
+| heat_2d | constrained | physics | 0.68 % | 5.68 % | 0 | 6.2 / 5.6 / 8.7 % | 3.30 % | 3 / 2 |
+| heat_2d | soft | physics | 0.65 % | 1.40 % | 0.09 / 1.17 % | 2.0 / 2.4 / 3.5 % | 1.00 % | 1 / 0 |
+| heat_2d | constrained | data | 0.77 % | 6.55 % | 0 | 5.9 / 6.3 / 9.5 % | 1.74 % | 2 / 0 |
+| heat_2d | soft | data | 0.42 % | 1.47 % | 0.10 / 0.85 % | 2.2 / 2.2 / 3.3 % | 0.65 % | 0 / 0 |
+| chloride_corner_2d | constrained | physics | 0.045 % | 0.07 % | 0 | 0.1 / 0.1 / 0.2 % | 0.07 % | 4 / 3 |
+| chloride_corner_2d | soft | physics | 0.089 % | 0.23 % | 0.18 / 0.48 % | 1.9 / 1.8 / 2.8 % | 0.33 % | 5 / 3 |
+| chloride_corner_2d | constrained | data | 0.021 % | 0.05 % | 0 | 0.1 / 0.1 / 0.2 % | 0.05 % | 3 / 2 |
+| chloride_corner_2d | soft | data | 0.195 % | 0.56 % | 0.20 / 0.58 % | 1.8 / 1.9 / 2.8 % | 0.91 % | 1 / 0 |
+
+- **heat_2d:** soft helps. The mean is equal or better, the worst example improves by a factor
+  of 4, the error away from the training grid by 2.5 to 3, and in physics the jumps in the
+  second half disappear. The jumps of constrained appear here as in heat_1d, but do not stop it
+  from reaching 0.68 %.
+- **chloride_corner_2d:** soft costs accuracy, 2× in physics and 9× in data, and about 15× away
+  from the training grid. Here g from the hard constraint already carries most of the solution.
+  In absolute terms all errors stay below 3 %.
+- Soft is therefore not better or worse as such: it pays off where the wrapper divides a large
+  target by τ (heat equation with fast modes) and costs accuracy where g already holds most of
+  the solution (chloride, beam_1d).
+
+One seed per configuration, as above.
 
 The kept runs are under `outputs/<benchmark>/<inputs>-soft/`. The ladder runs with the other
 weights are under `outputs/_superseded/soft_bc_ladder/`, ignored by `summarize.py`.

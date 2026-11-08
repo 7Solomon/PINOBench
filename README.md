@@ -169,7 +169,8 @@ and maximum (`bc_error_max`) over the test set; with the hard constraint it is 0
 
 Variant configs inherit from the base YAML through Hydra `defaults`, e.g.
 `configs/problem/beam_1d_sine.yaml`. `output_param` is set as an override. The pilot of all
-variants on `beam_1d` is summarized in [docs/VariantPilot.md](docs/VariantPilot.md).
+variants on `beam_1d` is summarized in [docs/VariantPilot.md](docs/VariantPilot.md), the soft
+constraints (1D pilot and 2D + t) in [docs/SoftConstraintPilot.md](docs/SoftConstraintPilot.md).
 
 `inputs` names what is sampled, so the same name can mean a different family in another
 benchmark. Each problem class lists its families in `SUPPORTED_INPUTS`, the first one is the
@@ -236,12 +237,12 @@ together: 24³, 32³, 48³, 64³.
 
 ## Restore points (Sicherungspunkte)
 
-The state after Phase 3 is tagged `pre-variants` (on `main`); the variant work lives on
-`feature/variants`. The outputs of that state are archived outside the repository.
+The state after the variant pilot and the cleanup of `outputs/`, before soft constraints and
+2D + t, is tagged `pre-phase4` (`git checkout pre-phase4`). The state after Phase 3 is tagged
+`pre-variants`. The outputs of that older state are archived outside the repository.
 
 ```bash
-git checkout main                  # or: git checkout pre-variants
-git branch -D feature/variants     # discard the variant branch (from main)
+git checkout pre-variants
 tar -xzf ../pino-outputs-pre-variants.tar.gz   # restore outputs/ (run in the repository root)
 ```
 
