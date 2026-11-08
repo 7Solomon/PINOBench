@@ -9,11 +9,14 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+import matplotlib.lines  # noqa: E402
+import matplotlib.patheffects  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 from pino.evaluation import EvaluationResult  # noqa: E402
 from pino.numerics.grids import resolution_size  # noqa: E402
+from pino.problems import problem_class  # noqa: E402
 from pino.problems.base import Problem  # noqa: E402
 
 # Fixed categorical order, validated for color-vision deficiencies.
@@ -21,6 +24,19 @@ SERIES_COLORS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100")
 REFERENCE_COLOR = "#52514e"
 TARGET_REL_L2 = 0.05
 TIME_FRACTIONS = (0.1, 0.4, 1.0)
+#: Rows of the overview: module of the problem class -> title. Others follow by name.
+SUMMARY_GROUPS = {
+    "mechanics": "Strukturmechanik",
+    "thermal": "Wärmeleitung",
+    "transport": "Stofftransport",
+    "hydro": "Strömung in porösen Medien",
+}
+#: Mode -> offset within a slot, marker shape, color.
+SUMMARY_MODES = {
+    "physics": (-0.27, "o", SERIES_COLORS[0]),
+    "data": (0.0, "s", SERIES_COLORS[1]),
+    "hybrid": (0.27, "^", SERIES_COLORS[2]),
+}
 
 plt.rcParams.update(
     {
@@ -402,34 +418,86 @@ def plot_run(problem: Problem, result: EvaluationResult, history: dict, mode: st
     plot_resolution(result.main_resolution_errors(), train_resolution, title, run_dir / "resolution.png")
 
 
+def _problem_group(benchmark: str) -> str:
+    """Physics group of a benchmark: the module of its problem class (mechanics, thermal, ...)."""
+    try:
+        return problem_class(benchmark).__module__.rsplit(".", 1)[-1]
+    except KeyError:
+        return "other"
+
+
 def plot_summary(rows: list[dict], path: Path) -> None:
-    """Grouped bars of the mean error per benchmark (and variant) and mode (log axis, 5 % line).
+    """Overview of the mean error: one row per physics group, one slot per benchmark and variant.
 
-    Error bars span the minimum and maximum over the seeds where rows carry them.
+    A dot plot, because bar lengths mean nothing on a logarithmic axis. Each mode has a color and
+    a marker shape, whiskers span the minimum and maximum over the seeds, values are in percent.
+    All rows share one error axis and one slot width, so they can be compared directly. The
+    groups follow the modules of the problem classes, so a new benchmark needs no entry here.
     """
-    labels = list(dict.fromkeys(row.get("label", row["benchmark"]) for row in rows))
-    modes = [mode for mode in ("physics", "data", "hybrid") if any(row["mode"] == mode for row in rows)]
-    width = 0.8 / max(len(modes), 1)
+    groups: dict[str, dict[str, dict[str, list[dict]]]] = {}
+    for row in rows:
+        group = groups.setdefault(_problem_group(row["benchmark"]), {})
+        group.setdefault(row["benchmark"], {}).setdefault(row.get("variant", ""), []).append(row)
+    order = [name for name in SUMMARY_GROUPS if name in groups] + sorted(set(groups) - set(SUMMARY_GROUPS))
+    slots = [sum(len(variants) for variants in groups[name].values()) + len(groups[name]) - 1 for name in order]
 
-    fig, ax = plt.subplots(figsize=(max(5.0, 2.2 * len(labels) + 2), 3.8), constrained_layout=True)
-    for offset, (mode, color) in enumerate(zip(modes, SERIES_COLORS)):
-        values = {row.get("label", row["benchmark"]): row["rel_l2_mean"] for row in rows if row["mode"] == mode}
-        positions = [i - 0.4 + width * (offset + 0.5) for i, b in enumerate(labels) if b in values]
-        heights = [values[b] for b in labels if b in values]
-        spread = {
-            row.get("label", row["benchmark"]): (row["rel_l2_mean"] - row.get("rel_l2_min", row["rel_l2_mean"]),
-                                                  row.get("rel_l2_max", row["rel_l2_mean"]) - row["rel_l2_mean"])
-            for row in rows
-            if row["mode"] == mode
-        }
-        errors = [[spread[b][0] for b in labels if b in values], [spread[b][1] for b in labels if b in values]]
-        bars = ax.bar(positions, heights, width=width * 0.9, color=color, label=mode, yerr=errors,
-                      error_kw={"elinewidth": 0.8, "capsize": 2, "ecolor": REFERENCE_COLOR})
-        ax.bar_label(bars, labels=[f"{100 * h:.2f} %" for h in heights], fontsize=7, padding=2)
-    ax.axhline(TARGET_REL_L2, color=REFERENCE_COLOR, linestyle="--", linewidth=1, label="5 %")
-    ax.set_xticks(range(len(labels)), labels)
-    ax.set(yscale="log", ylabel="rel. L2 (Testset, Mittel)", title="Übersicht aller Benchmarks")
-    ax.grid(axis="x", visible=False)
-    _percent_axis(ax)
-    ax.legend()
+    values = [row["rel_l2_mean"] for row in rows] + [row.get("rel_l2_min", row["rel_l2_mean"]) for row in rows]
+    highs = [row.get("rel_l2_max", row["rel_l2_mean"]) for row in rows] + [TARGET_REL_L2]
+    limits = (min(values) / 2.0, max(highs) * 2.5)
+
+    width = max(7.0, 1.0 * max(slots) + 1.2)
+    fig, axes = plt.subplots(
+        len(order), 1, figsize=(width, 2.5 * len(order) + 0.7), constrained_layout=True, squeeze=False,
+    )
+    for ax, name in zip(axes[:, 0], order):
+        position = 0
+        for benchmark, variants in groups[name].items():
+            first = position
+            for variant, entries in variants.items():
+                by_mode = {entry["mode"]: entry for entry in entries}
+                for mode, (offset, marker, color) in SUMMARY_MODES.items():
+                    if mode not in by_mode:
+                        continue
+                    entry = by_mode[mode]
+                    mean = entry["rel_l2_mean"]
+                    spread = [[mean - entry.get("rel_l2_min", mean)], [entry.get("rel_l2_max", mean) - mean]]
+                    ax.errorbar(position + offset, mean, yerr=spread, fmt=marker, color=color, markersize=6,
+                                markeredgecolor="white", markeredgewidth=0.6, elinewidth=1.0, capsize=2, zorder=3)
+                    # Above the upper whisker, with a halo so that no line crosses the number.
+                    ax.annotate(f"{100 * mean:.2f}", (position + offset, mean + spread[1][0]), xytext=(0, 5),
+                                textcoords="offset points", ha="center", fontsize=6.5, color=REFERENCE_COLOR, zorder=4,
+                                path_effects=[matplotlib.patheffects.withStroke(linewidth=2, foreground="white")])
+                position += 1
+            # Benchmark name above its slots, thin rule between benchmarks.
+            ax.annotate(benchmark, ((first + position - 1) / 2, 1.0), xycoords=("data", "axes fraction"),
+                        xytext=(0, 3), textcoords="offset points", ha="center", va="bottom", fontsize=8.5)
+            if position < slots[order.index(name)]:
+                ax.axvline(position, color="#c9c8c3", linewidth=0.8)
+                position += 1
+        labels = {}
+        position = 0
+        for variants in groups[name].values():
+            for variant in variants:
+                labels[position] = variant.replace("/", "\n")
+                position += 1
+            position += 1
+        ax.set_xticks(list(labels), list(labels.values()), fontsize=7.5)
+        ax.tick_params(axis="x", length=0)
+        ax.set_xlim(-0.6, max(slots) - 0.4)  # the same slot width in every row
+        ax.axhline(TARGET_REL_L2, color=REFERENCE_COLOR, linestyle="--", linewidth=1, zorder=1)
+        ax.annotate("5 %", xy=(1, TARGET_REL_L2), xycoords=("axes fraction", "data"), xytext=(-2, 3),
+                    textcoords="offset points", ha="right", color=REFERENCE_COLOR, fontsize=7.5)
+        ax.set(yscale="log", ylim=limits, ylabel="rel. L2 (Testset)")
+        ax.yaxis.set_major_locator(matplotlib.ticker.LogLocator(base=10, numticks=12))
+        ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{100 * v:g} %"))
+        ax.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+        ax.grid(axis="x", visible=False)
+        ax.set_title(SUMMARY_GROUPS.get(name, name.capitalize()), loc="left", fontweight="bold", fontsize=9.5, pad=16)
+    handles = [
+        matplotlib.lines.Line2D([], [], linestyle="", marker=marker, color=color, markersize=6, label=mode)
+        for mode, (_, marker, color) in SUMMARY_MODES.items()
+    ]
+    fig.legend(handles=handles, loc="outside upper right", ncols=3, fontsize=8, title="Modus (Werte in %, Whisker: Min–Max über Seeds)",
+               title_fontsize=8)
+    fig.suptitle("Übersicht aller Benchmarks", x=0.01, ha="left", fontsize=11)
     _save(fig, path)

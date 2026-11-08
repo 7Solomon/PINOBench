@@ -58,3 +58,18 @@ def test_default_variant_is_per_benchmark(tmp_path):
     assert rows["heat_1d"]["variant"] == "sine/constrained" and rows["heat_1d"]["label"] == "heat_1d"
     assert rows["darcy_layered_1d"]["variant"] == "two_layer/constrained"
     assert rows["darcy_layered_1d"]["label"] == "darcy_layered_1d"
+
+
+def test_overview_plot_groups_by_physics_and_accepts_unknown_benchmarks(tmp_path):
+    from pino.visualization import _problem_group, plot_summary
+
+    assert _problem_group("beam_1d") == "mechanics" and _problem_group("heat_2d") == "thermal"
+    assert _problem_group("chloride_1d") == "transport" and _problem_group("darcy_poisson_2d") == "hydro"
+    assert _problem_group("not_registered") == "other"
+    rows = [
+        {"benchmark": name, "variant": "a/constrained", "mode": mode, "rel_l2_mean": 0.01, "rel_l2_min": 0.005, "rel_l2_max": 0.02}
+        for name in ("beam_1d", "heat_1d", "not_registered")
+        for mode in ("physics", "data")
+    ]
+    plot_summary(rows, tmp_path / "summary.png")
+    assert (tmp_path / "summary.png").stat().st_size > 0
