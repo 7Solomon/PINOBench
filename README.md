@@ -52,8 +52,9 @@ any other resolution. Inputs are given in the problem's own parametrization, the
 `sample_inputs` for one example (heat_1d: b₁…b₅; chloride_1d: Cs, D; darcy_poisson_2d: the
 4 × 4 coefficients, flattened). Inputs outside the trained range (`Problem.input_ranges()`,
 by default the extremes of 20 000 samples, with 1 % tolerance) are evaluated as well but
-flagged as extrapolation. Only the operator inputs can be varied: heat_1d, for example, has
-no boundary values among its inputs.
+flagged as extrapolation. Only the operator inputs can be varied: heat_1d with `sine` has no
+boundary values among its inputs, heat_1d with `sine_ramp` has
+(`scripts/predict.py heat_1d --family sine_ramp --inputs b1,b2,b3,b4,b5,aL,bL,aR,bR`).
 
 Runs are chosen by `find_run(benchmark, mode, output_param, inputs, seed)`, the newest finished
 run of that combination by its `metrics.json` timestamp (`inputs` defaults to the original
@@ -174,13 +175,14 @@ constraints (1D pilot and 2D + t) in [docs/SoftConstraintPilot.md](docs/SoftCons
 
 `inputs` names what is sampled, so the same name can mean a different family in another
 benchmark. Each problem class lists its families in `SUPPORTED_INPUTS`, the first one is the
-default; every other value is refused. Only `beam_1d` has a second family so far.
+default; every other value is refused. `beam_1d` and `heat_1d` have a second family so far.
 
 | Benchmark | `inputs` | Sampled operator input |
 |---|---|---|
 | `beam_1d` | **`linear`** | q = q₀ + q₁x, q₀, q₁ ~ U(0, 1); EI ~ U(0.5, 2) |
 | | `sine` | q = Σ_{n=1}^{8} qₙ sin(nπx), qₙ ~ U(−1, 1)/n; EI ~ U(0.5, 2) |
 | `heat_1d` | **`sine`** | T₀ = Σ_{n=1}^{5} bₙ sin(nπx), bₙ ~ U(−1, 1) |
+| | `sine_ramp` | as `sine`, plus boundary values linear in time: T(0, t) = α_L + β_L t, T(1, t) = α_R + β_R t, α ~ U(−1, 1), β ~ U(−10, 10); T₀ = (1−x)α_L + xα_R + Σ bₙ sin(nπx) |
 | `richards_steady_1d` | **`uniform`** | α ~ U(1, 5), q/Ks ~ U(−0.9, −0.1) |
 | `darcy_layered_1d` | **`two_layer`** | k₁, k₂ log-uniform in [0.1, 10], x_s ~ U(0.3, 0.7) |
 | `chloride_1d` | **`uniform`** | Cs ~ U(0.5, 1), D ~ U(0.2, 1) |
@@ -191,6 +193,21 @@ Default in bold. `beam_1d` with `inputs: sine`:
 | Exact solution | Normalization (loss only) |
 |---|---|
 | M = Σ qₙ sin(nπx)/(nπ)², w = Σ qₙ sin(nπx)/(EI (nπ)⁴) | q_rms = √(Σqₙ²/2); equilibrium / q_rms, curvature / (M_c/EI) with M_c = q_rms/π²; `data_scale` = (q_rms/(π⁴EI), q_rms/π²), the amplitudes of a single first mode |
+
+`heat_1d` with `inputs: sine_ramp` (`problem=heat_1d_sine_ramp`), so that boundary values can be
+varied in a trained model. Operator inputs are b₁…b₅, α_L, β_L, α_R, β_R; the network also sees
+T_L(t) and T_R(t), 5 channels instead of 3. Exact solution by lifting:
+T = (1−x)T_L(t) + xT_R(t) + w, where w is the sine series of T₀'s b_n plus the response to the
+ramp source, truncated after 200 modes (solution accurate to about 1e-5). Results, seed 42,
+500 epochs on 64 × 64:
+
+| Variant | Mode | rel. L2 | Worst example | Boundary error max | Error at 32 / 128 / 256 |
+|---|---|---|---|---|---|
+| constrained | physics | 1.82 % | 8.97 % | 0 | 3.4 / 2.3 / 2.8 % |
+| constrained | data | 0.78 % | 2.08 % | 0 | 3.8 / 2.2 / 3.1 % |
+| constrained | hybrid | 0.56 % | 1.82 % | 0 | 3.9 / 1.9 / 2.9 % |
+| soft (bc 1) | physics | 1.92 % | 6.55 % | 0.77 % | 4.4 / 2.9 / 3.7 % |
+| soft (bc 1) | data | 0.60 % | 1.26 % | 1.15 % | 4.0 / 2.1 / 3.0 % |
 
 Every problem class has a `WRAPPER_VERSION`, increased by hand whenever g, φ or the output
 scaling change. `metrics.json` and `history.json` store `wrapper_version`, `inputs` and
