@@ -67,7 +67,9 @@ older run lacks them.
   [--family …] [--seed …] [--resolution 128 | 64x64x32] [--name …]`; `--show-ranges` prints the
   trained ranges, `--no-save` only prints the result.
 - `notebooks/explore.ipynb` does the same interactively with inline plots, e.g. in VS Code
-  over SSH (needs `ipykernel`: `pip install -e ".[notebook]"`).
+  over SSH (needs `ipykernel`: `pip install -e ".[notebook]"`). Its last part has a ready-to-run
+  block per benchmark: named inputs, including some outside the trained range, a table of all
+  trained variants against these inputs, and the details and plots of one variant.
 
 Saved predictions go to `<run_dir>/predictions/<name>/` (`inputs.json`, `result.json`,
 `prediction.pt`, `solution.png`), next to the model they come from. `summarize.py` only
@@ -109,7 +111,7 @@ insulated edge ∂T/∂n = 0 fits the same way. Then
 
     L_neumann = mean over the points of all conditions of ((q − target) / s)²
 
-with s from `Problem.neumann_scale`, the load RMS per sample in `elastic_block_2d`. `weights.neumann`
+with s from `Problem.neumann_scale`, the RMS of the load or of T_top per sample in the block benchmarks. `weights.neumann`
 is 10 in `physics` and `hybrid` and acts for every `output_param`; `loss_weights.neumann` in the
 problem YAML replaces it. In `data` it is 0 and only acts when set to > 0 explicitly with
 `training.weights.neumann`; the YAML value is not applied there. The component appears in
@@ -203,6 +205,7 @@ default; every other value is refused. `beam_1d` and `heat_1d` have a second fam
 | `chloride_1d` | **`uniform`** | Cs ~ U(0.5, 1), D ~ U(0.2, 1) |
 | `darcy_poisson_2d` | **`sine`** | f = Σ_{m,n=1}^{4} a_mn sin(mπx) sin(nπy), a_mn ~ U(−1, 1) |
 | `elastic_block_2d` | **`cosine`** | p = p₀ + Σ_{n=1}^{6} pₙ cos(nπx), p₀ ~ U(0.5, 1), pₙ ~ U(−0.5, 0.5)/n; ν ~ U(0.15, 0.35) |
+| `thermoelastic_block_2d` | **`cosine`** | T_top = t₀ + Σ_{n=1}^{6} tₙ cos(nπx), t₀ ~ U(0.5, 1), tₙ ~ U(−0.5, 0.5)/n; ν ~ U(0.15, 0.35) |
 
 Default in bold. `beam_1d` with `inputs: sine`:
 
@@ -295,6 +298,7 @@ only used to show the plots in physical units.
 | `heat_2d` | ∂T/∂t = a ΔT on [0, 1]², t ∈ [0, 0.05], a = 1, T = 0 on the boundary | T₀ = Σ_{m,n=1}^{3} b_mn sin(mπx) sin(nπy), b_mn ~ U(−1, 1) | T = Σ b_mn sin(mπx) sin(nπy) exp(−aπ²(m² + n²)t) | T |
 | `chloride_corner_2d` | ∂C/∂t = D ΔC on [0, 1]², t ∈ [0.02, 0.05]; C = Cs on x = 0 and y = 0, x = 1, y = 1 and C(x, y, t₀) analytical | Cs ~ U(0.5, 1), D ~ U(0.4, 1) | C = Cs [1 − erf(x/(2√(Dt))) · erf(y/(2√(Dt)))] (product of two 1D solutions, C₀ = 0) | C |
 | `elastic_block_2d` | Navier–Lamé in plane stress, E = 1, on [0, 1]²; sliding supports, see below | p(x) = p₀ + Σ_{n=1}^{6} pₙ cos(nπx), ν | mode 0: v = −p₀(1 − ν²)y, u = 0; modes n ≥ 1: Airy stress function Φ = cos(nπx) f(y), f = A cosh + D y sinh | v |
+| `thermoelastic_block_2d` | ΔT = 0 and Navier–Lamé with thermal strain, plane stress, E = α = 1, on [0, 1]²; supports as `elastic_block_2d`, top free of stress; T = T_top on top, T = 0 at the bottom, insulated sides | T_top(x) = t₀ + Σ_{n=1}^{6} tₙ cos(nπx), ν | mode 0: T = t₀y, u = 0, v = (1+ν)t₀y²/2; modes n ≥ 1: T = tₙ cos(nπx) sinh(nπy)/sinh(nπ), stress function F = A cosh + B sinh + C y cosh + D y sinh (Goodier potential for the displacements) | v |
 
 | Benchmark | FNO | Hard constraint | Residual normalization | Reference values |
 |---|---|---|---|---|
@@ -307,6 +311,7 @@ only used to show the plots in physical units.
 | `heat_2d` | 3D over (x, y, t), input T₀, x, y, t/t_end | `dirichlet_2d_t` with u₀ = T₀ and zero edges: T = T₀ + τ·x(1−x)y(1−y)·NN | divided by aπ²·2M² = 178, the fastest decay rate (as heat_1d) | L and ΔT in the YAML (1 m, 1 K); time non-dimensional, t̂ = a t/L² |
 | `chloride_corner_2d` | 3D over (x, y, t), input Cs, D, x, y, τ | `dirichlet_2d_t` with C(x, y, t₀), Cs on x = 0 and y = 0, analytical values on x = 1 and y = 1 | per sample divided by Cs/t₀ (as chloride_1d) | as chloride_1d: L = 200 mm, D_ref = 10⁻¹² m²/s, t_ref ≈ 1268 a, so t ∈ [25.3, 63.4] a; C in M.-%/binder |
 | `elastic_block_2d` | 2D over (x, y), input p(x), ν, x, y; output u, v | per channel: u = x(1−x)·c_u·NN_u, v = y·c_v·NN_v, g = 0, c = (0.019, 0.42) | residual and L_neumann divided by the load RMS per sample | L = H = 2 m, E = 30 GPa, p_ref = 10 MPa; u, v in mm, σ in MPa |
+| `thermoelastic_block_2d` | 2D over (x, y), input T_top(x), ν, x, y; output T, u, v | per channel: T = y·T_top + y(1−y)·c_T·NN_T, u = x(1−x)·c_u·NN_u, v = y·c_v·NN_v, c = (0.45, 0.026, 0.22) | ΔT by π², all equations and L_neumann divided by the RMS of T_top per sample | L = H = 2 m, E = 30 GPa, α = 10⁻⁵/K, ΔT_ref = 20 K; T in K, u, v in mm, σ in MPa |
 
 The normalizations are explained in the docstrings of the problem classes.
 
@@ -343,10 +348,33 @@ stresses by finite differences).
 `data` and `hybrid` give working networks. Details, the weight search and the cause are in
 [docs/ElasticBlock.md](docs/ElasticBlock.md).
 
+### `thermoelastic_block_2d`: supports and results
+
+The same block and supports, heated on top instead of loaded, with one network for T, u and v. The
+top is free of stress: σ_yy = σ_xy = 0. The predicted T enters the mechanics as thermal strain, in
+the residual and in the stresses. The sides are insulated through `L_neumann` as T_x = 0, next to the
+stress conditions. A harmonic T leaves a free body almost free of stress, so only the supports
+restrain it: σ_xx is about 2.6 MPa, σ_yy and σ_xy only about 0.03 and 0.02 MPa. For that reason
+`metrics.json` also has `stress_rmse`, the root mean square error of each stress in MPa.
+
+| Variant | Mode | v | T | u | σ_xx | RMSE σ_yy / σ_xy [MPa] | Top σ_yy error |
+|---|---|---|---|---|---|---|---|
+| constrained | physics | 15.37 % | 8.48 % | 37.5 % | 8.64 % | 0.104 / 0.061 | 3.4 % |
+| constrained | data | 0.62 % | 0.33 % | 0.69 % | 1.62 % | 0.107 / 0.055 | 32.9 % |
+| constrained | hybrid | 5.54 % | 1.60 % | 5.51 % | 2.56 % | 0.130 / 0.041 | 9.0 % |
+| soft (bc 1) | physics | 20.30 % | 13.0 % | 65.5 % | 12.5 % | 0.097 / 0.051 | 3.8 % |
+| soft (bc 1) | data | 0.43 % | 0.32 % | 0.65 % | 1.51 % | 0.118 / 0.049 | 33.5 % |
+| direct | data | 0.36 % | 0.31 % | 0.56 % | 1.30 % | 0.094 / 0.041 | 23.6 % |
+
+The `data` variants meet the 5 % criterion in T, u and v. `constrained` `physics` and `hybrid` miss
+it. No variant predicts σ_yy and σ_xy usefully: the error exceeds the signal. Details and the weight
+search are in [docs/ThermoelasticBlock.md](docs/ThermoelasticBlock.md).
+
 ### Generic helpers
 
 | Helper | Purpose |
 |---|---|
+| `evaluation.stress_rmse` | root mean square error of each stress in physical units, for stresses too small for a relative error |
 | `numerics.constraints.dirichlet_1d` | stationary 1D, Dirichlet values on both ends |
 | `numerics.constraints.dirichlet_1d_t` | 1D in time: initial profile u₀(x) and time-dependent end values u_L(t), u_R(t) |
 | `numerics.constraints.dirichlet_2d` | stationary 2D: transfinite (Coons) interpolation of four edge functions |
@@ -359,12 +387,6 @@ stresses by finite differences).
 | `pdes.elasticity.plane_stress` | σ_xx, σ_yy, σ_xy from u, v, with optional thermal strain ε_th: σ_xx = E/(1−ν²)·[(ε_xx − ε_th) + ν(ε_yy − ε_th)], σ_yy alike, σ_xy = E/(2(1+ν))·(u_y + v_x) |
 | `pdes.elasticity.navier_lame_residual` | ∇·σ = 0 in displacement form: E/(1−ν²)·[u_xx + (1−ν)/2·u_yy + (1+ν)/2·v_xy] − E/(1−ν)·∂ε_th/∂x, and the same for v with x and y swapped |
 | `problems.base.NeumannCondition` | one condition (edge, quantity, target) of `L_neumann` |
-
-### Planned
-
-`thermoelastic_block_2d`: the block of `elastic_block_2d`, heated on top with T_top(x) as a cosine
-series, T = 0 at the bottom, insulated sides, top free of stress; steady heat conduction plus
-thermoelasticity (Goodier potential), one FNO with the outputs T, u and v.
 
 
 ## Data flow
