@@ -218,8 +218,26 @@ def boundary_error_summary(problem: Problem, bc_errors: Tensor | None) -> dict[s
     }
 
 
-def mechanics_summary(result: EvaluationResult) -> dict:
-    """``neumann_error_*`` per condition and ``rel_l2_stress`` per component, where they exist."""
+def stress_rmse(problem: Problem, result: EvaluationResult, batch_size: int = 64) -> dict[str, float]:
+    """RMS error of the finite-difference stresses in physical units, mean over the test set.
+
+    Rel. L2 alone says little for a component that is small everywhere, such as ``sigma_yy`` of a
+    block heated with a harmonic temperature: there even the exact displacements have a large
+    relative error from the finite differences.
+    """
+    dataset, totals = result.dataset, {}
+    for start in range(0, len(dataset.inputs), batch_size):
+        inputs = dataset.inputs[start : start + batch_size]
+        predicted = problem.stress_fields(result.predictions[start : start + batch_size], inputs, dataset.grid)
+        exact = problem.exact_stress_fields(inputs, dataset.grid)
+        for name, field in predicted.items():
+            values = (field - exact[name]).flatten(1).pow(2).mean(dim=1).sqrt()
+            totals[name] = totals.get(name, 0.0) + values.sum().item()
+    return {name: float(problem.to_physical("sigma", total / len(dataset.inputs))) for name, total in totals.items()}
+
+
+def mechanics_summary(result: EvaluationResult, problem: Problem) -> dict:
+    """``neumann_error_*`` per condition, ``rel_l2_stress`` and ``stress_rmse`` per component, where they exist."""
     summary: dict = {}
     if result.neumann_errors is not None:
         columns = list(zip(result.neumann_labels, result.neumann_errors.T))
@@ -227,6 +245,7 @@ def mechanics_summary(result: EvaluationResult) -> dict:
         summary["neumann_error_max"] = {label: values.max().item() for label, values in columns}
     if result.stress_errors:
         summary["rel_l2_stress"] = {name: summarize_errors(values) for name, values in result.stress_errors.items()}
+        summary["stress_rmse"] = stress_rmse(problem, result)
     return summary
 
 
@@ -289,7 +308,7 @@ def write_metrics(
         "resolution_study": {str(k): v for k, v in result.main_resolution_errors().items()},
         "resolution_study_per_variable": {str(k): v for k, v in result.resolution_errors.items()},
         **boundary_error_summary(problem, result.bc_errors),
-        **mechanics_summary(result),
+        **mechanics_summary(result, problem),
         "train_resolution": resolution_key(cfg.problem.train_resolution),
         "test_resolution": resolution_key(cfg.problem.test_resolution),
         "training_time_s": training_time_s,

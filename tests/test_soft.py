@@ -41,8 +41,8 @@ def expected_mask(problem, grid: torch.Tensor) -> torch.Tensor:
     return mask
 
 
-#: Prescribes each output channel on its own edges, see tests/test_elastic_block.py.
-PER_CHANNEL = ("elastic_block_2d",)
+#: Prescribes each output channel on its own edges, see tests/test_elastic_block.py and tests/test_thermoelastic_block.py.
+PER_CHANNEL = ("elastic_block_2d", "thermoelastic_block_2d")
 
 
 @pytest.mark.parametrize("name", [name for name in available_problems() if name not in PER_CHANNEL])
