@@ -3,6 +3,7 @@ weights:
   physics: 1.0
   data: 0.0
   bc: 10.0       # boundary penalty L_bc, only with output_param=soft
+  neumann: 10.0  # stress and flux conditions L_neumann
 epochs: 500
 batch_size: 32
 lr: 1.0e-3

@@ -3,6 +3,7 @@ weights:
   physics: 0.0
   data: 1.0
   bc: 10.0       # boundary penalty L_bc, only with output_param=soft
+  neumann: 0.0  # L_neumann is off unless set on the command line
 epochs: 500
 batch_size: 32
 lr: 1.0e-3
