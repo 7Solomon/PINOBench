@@ -3,7 +3,7 @@
 Typical use, in a script or a notebook::
 
     run = load_latest("heat_1d", mode="physics")  # newest run, default inputs, constrained
-    run = load_run("outputs/heat_1d/sine-constrained/physics/<timestamp>")  # a specific run
+    run = load_run("workspace/outputs/heat_1d/sine-constrained/physics/<timestamp>")  # a specific run
     prediction = predict_one(run, [1.0, 0.0, 0.5, 0.0, 0.0], resolution=128)
     save_prediction(run, prediction, "half_and_third_mode")
 
@@ -37,6 +37,7 @@ from pino.evaluation import (
 from pino.losses import overridden_keys, resolve_loss_weights, resolve_training_settings
 from pino.models.factory import build_model
 from pino.numerics.grids import resolution_key
+from pino.paths import OUTPUTS
 from pino.problems import build_problem, problem_class
 from pino.problems.base import Problem
 from pino.trainer import CHECKPOINT, HISTORY, select_device
@@ -53,7 +54,7 @@ def find_run(
     output_param: str = "constrained",
     inputs: str | None = None,
     seed: int | None = None,
-    outputs: str | Path = "outputs",
+    outputs: str | Path = OUTPUTS,
 ) -> Path:
     """Return the newest finished run of a combination, by the ``metrics.json`` timestamp.
 
@@ -80,7 +81,7 @@ def find_run(
 
 
 def load_latest(benchmark: str, mode: str = "physics", output_param: str = "constrained", inputs: str | None = None,
-                seed: int | None = None, outputs: str | Path = "outputs", device: str = "auto") -> "LoadedRun":
+                seed: int | None = None, outputs: str | Path = OUTPUTS, device: str = "auto") -> "LoadedRun":
     """:func:`load_run` of :func:`find_run`."""
     return load_run(find_run(benchmark, mode, output_param, inputs, seed, outputs), device)
 

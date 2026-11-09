@@ -47,9 +47,9 @@ def test_sine_config_inherits_from_beam_1d(cfg):
 def test_run_directory_contains_the_variant():
     hydra_cfg = compose_config("problem=beam_1d_sine", "problem.output_param=unscaled", "training=physics")
     run_dir = hydra_cfg.hydra.run.dir
-    assert run_dir.startswith("outputs/beam_1d/sine-unscaled/physics/")
+    assert run_dir.startswith("workspace/outputs/beam_1d/sine-unscaled/physics/")
     default = compose_config().hydra.run.dir
-    assert default.startswith("outputs/heat_1d/sine-constrained/physics/")
+    assert default.startswith("workspace/outputs/heat_1d/sine-constrained/physics/")
 
 
 def test_sampler_follows_the_configured_family(problem, cfg):

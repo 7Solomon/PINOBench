@@ -31,4 +31,4 @@ Findings:
 - 1D GPU training is not bit-reproducible (non-deterministic CUDA kernels); single runs of the
   same seed differ, e.g. stage 1 physics seed 42: 0.43 %, 1.39 %, 0.82 %.
 
-The raw runs are under `outputs/beam_1d/<inputs>-<output_param>/`.
+The raw runs are under `workspace/outputs/beam_1d/<inputs>-<output_param>/`.

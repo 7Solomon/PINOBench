@@ -4,9 +4,9 @@ Rows are grouped by benchmark x ``inputs`` x ``output_param`` x mode and aggrega
 seeds: for every seed the most recent run is used, and the mean rel. L2 of each run (main
 variable) is reported as mean, minimum and maximum over the seeds. Runs without variant
 fields count as the benchmark's original input family (the first of ``SUPPORTED_INPUTS``)
-with ``constrained``. Runs below ``outputs/_superseded/`` are ignored.
+with ``constrained``. Runs below ``workspace/outputs/_superseded/`` are ignored.
 
-Usage: ``python scripts/summarize.py [--outputs outputs]``
+Usage: ``python scripts/summarize.py [--outputs workspace/outputs]``
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 from statistics import mean
 
+from pino.paths import OUTPUTS
 from pino.problems import problem_class
 from pino.visualization import plot_summary
 
@@ -120,7 +121,7 @@ def format_row(row: dict) -> list[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--outputs", type=Path, default=Path("outputs"))
+    parser.add_argument("--outputs", type=Path, default=Path(OUTPUTS))
     args = parser.parse_args()
 
     rows = collect(args.outputs)

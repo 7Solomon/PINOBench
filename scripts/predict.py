@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 from pino.inference import IncompatibleRunError, find_run, load_run, predict_one, save_prediction
+from pino.paths import OUTPUTS
 
 
 def parse_resolution(text: str | None):
@@ -43,7 +44,7 @@ def main() -> None:
     parser.add_argument("--output-param", default="constrained", help="with a benchmark name: output_param")
     parser.add_argument("--family", help="with a benchmark name: input family (default: the original one)")
     parser.add_argument("--seed", type=int, help="with a benchmark name: seed (default: any)")
-    parser.add_argument("--outputs", default="outputs", help="with a benchmark name: outputs directory")
+    parser.add_argument("--outputs", default=OUTPUTS, help="with a benchmark name: outputs directory")
     parser.add_argument("--inputs", help="comma-separated operator inputs, e.g. 1,0,0.5,0,0")
     parser.add_argument("--resolution", help="e.g. 128 or 64x64x32 (default: test resolution of the run)")
     parser.add_argument("--name", help="subdirectory under predictions/ (default: timestamp)")

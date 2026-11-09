@@ -120,5 +120,5 @@ throughout, and two lanes of this benchmark shared the GPU nearly all the time.
 
 ## Where the runs are
 
-The kept runs are under `outputs/thermoelastic_block_2d/cosine-<output_param>/`. The search runs
-with neumann 1 and 100 are under `outputs/_superseded/neumann_ladder/`, ignored by `summarize.py`.
+The kept runs are under `workspace/outputs/thermoelastic_block_2d/cosine-<output_param>/`. The search runs
+with neumann 1 and 100 are under `workspace/outputs/_superseded/neumann_ladder/`, ignored by `summarize.py`.

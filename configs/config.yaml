@@ -9,6 +9,6 @@ device: auto  # auto | cpu | cuda | cuda:N
 
 hydra:
   run:
-    dir: outputs/${problem.name}/${problem.inputs}-${problem.output_param}/${training.mode}/${now:%Y-%m-%d_%H-%M-%S}
+    dir: workspace/outputs/${problem.name}/${problem.inputs}-${problem.output_param}/${training.mode}/${now:%Y-%m-%d_%H-%M-%S}
   job:
     chdir: false

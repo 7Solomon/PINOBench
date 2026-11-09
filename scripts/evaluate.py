@@ -1,6 +1,6 @@
 """Evaluate a finished run again and rewrite its metrics and plots.
 
-Usage: ``python scripts/evaluate.py outputs/heat_1d/physics/<timestamp> [--device cpu] [--allow-legacy]``
+Usage: ``python scripts/evaluate.py workspace/outputs/heat_1d/physics/<timestamp> [--device cpu] [--allow-legacy]``
 
 The run's ``wrapper_version``, ``inputs`` and ``output_param`` must match the current code.
 Runs written before these fields existed are refused unless ``--allow-legacy`` is given.

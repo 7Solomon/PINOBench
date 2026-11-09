@@ -33,16 +33,31 @@ python scripts/train.py problem=beam_1d training=data problem.output_param=direc
 python scripts/train.py problem=heat_1d training=physics problem.output_param=soft training.weights.bc=100
 
 # re-evaluate and re-plot a finished run (refuses runs with a different wrapper)
-python scripts/evaluate.py outputs/heat_1d/sine-constrained/physics/<timestamp>
+python scripts/evaluate.py workspace/outputs/heat_1d/sine-constrained/physics/<timestamp>
 python scripts/evaluate.py <run_dir> --allow-legacy  # runs without wrapper_version
 
-# collect all runs under outputs/
+# collect all runs under workspace/outputs/
 python scripts/summarize.py
 
 # evaluate a trained model on one hand-made input (see "Exploring a trained model")
 python scripts/predict.py heat_1d --inputs 1,0,0.5,0,0 --name half_mode   # newest physics/constrained run
 python scripts/predict.py heat_1d --mode data --output-param soft --inputs 1,0,0.5,0,0
 ```
+
+### Weights as text
+
+```bash
+python scripts/export_weights.py heat_1d --mode hybrid  # newest hybrid/constrained run
+python scripts/export_weights.py <run_dir> --digits 9   # exact instead of rounded
+python scripts/export_weights.py heat_1d --only "lifting.*,projection.*" --out head.txt
+```
+
+The default output is `workspace/weights/<benchmark>/<inputs>-<output_param>.txt`. Each tensor
+has a line `# tensor <name> shape=[...] dtype=...` and a line with its values in row-major
+order; a complex number is written as `re im`. The default of 4 significant digits rounds the
+weights; `--digits 9` restores every value exactly. The file name holds neither mode nor seed
+and the file does not name its run, so the script prints the run and refuses to replace an
+existing file without `--force`.
 
 ### Exploring a trained model
 
@@ -75,7 +90,7 @@ Saved predictions go to `<run_dir>/predictions/<name>/` (`inputs.json`, `result.
 `prediction.pt`, `solution.png`), next to the model they come from. `summarize.py` only
 collects `metrics.json` and ignores them.
 
-Each run writes to `outputs/<benchmark>/<inputs>-<output_param>/<mode>/<timestamp>/`:
+Each run writes to `workspace/outputs/<benchmark>/<inputs>-<output_param>/<mode>/<timestamp>/`:
 
 | File | Content |
 |---|---|
@@ -88,9 +103,9 @@ Each run writes to `outputs/<benchmark>/<inputs>-<output_param>/<mode>/<timestam
 | `resolution.png` | rel. L2 against the test resolution |
 | `.hydra/config.yaml` | full configuration of the run |
 
-`summarize.py` writes `outputs/summary.csv`, `outputs/summary.md` and `outputs/summary.png`.
+`summarize.py` writes `workspace/outputs/summary.csv`, `workspace/outputs/summary.md` and `workspace/outputs/summary.png`.
 It groups by benchmark × `inputs` × `output_param` × mode, takes the most recent run per seed
-and reports the mean, minimum and maximum over the seeds. Runs under `outputs/_superseded/`
+and reports the mean, minimum and maximum over the seeds. Runs under `workspace/outputs/_superseded/`
 are ignored.
 
 ### Training modes

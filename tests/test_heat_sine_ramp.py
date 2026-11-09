@@ -41,7 +41,7 @@ def test_config_inherits_from_heat_1d_and_names_the_run_directory(cfg):
     assert cfg.name == "heat_1d" and cfg.inputs == "sine_ramp" and cfg.n_series == 5 and cfg.t_end == 0.1
     assert cfg.loss_weights.bc == 1.0
     run_dir = compose_config("problem=heat_1d_sine_ramp", "training=physics").hydra.run.dir
-    assert run_dir.startswith("outputs/heat_1d/sine_ramp-constrained/physics/")
+    assert run_dir.startswith("workspace/outputs/heat_1d/sine_ramp-constrained/physics/")
 
 
 def test_sampler_follows_the_configured_ranges(problem, cfg):

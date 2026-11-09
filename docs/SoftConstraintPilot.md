@@ -133,5 +133,5 @@ bc = 1 (the weight of heat_1d, the most similar benchmark). Seed 42, grid 32³, 
 
 One seed per configuration, as above.
 
-The kept runs are under `outputs/<benchmark>/<inputs>-soft/`. The ladder runs with the other
-weights are under `outputs/_superseded/soft_bc_ladder/`, ignored by `summarize.py`.
+The kept runs are under `workspace/outputs/<benchmark>/<inputs>-soft/`. The ladder runs with the other
+weights are under `workspace/outputs/_superseded/soft_bc_ladder/`, ignored by `summarize.py`.

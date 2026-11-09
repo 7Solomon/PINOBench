@@ -11,7 +11,7 @@ dist/
 venv/
 
 # Run results (Hydra, checkpoints, plots)
-outputs/
+workspace/
 multirun/
 *.pt
 
